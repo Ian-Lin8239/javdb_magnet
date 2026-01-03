@@ -45,7 +45,12 @@ git config --global user.email "your_email@example.com"
 打開 PowerShell 或命令提示字元，進入專案目錄：
 
 ```bash
-cd "C:\Users\IanYC_Lin\OneDrive - ASUS\Cursor\JM"
+cd "您的專案路徑"
+```
+
+例如：
+```bash
+cd "C:\Users\YourUsername\YourProject\JM"
 ```
 
 初始化 Git 倉庫：
