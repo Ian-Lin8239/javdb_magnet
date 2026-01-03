@@ -2,11 +2,11 @@
 
 ## 🎯 工具概述
 
-這是一個專門針對 JavDB 網站的磁力鏈接提取工具，**專門用於獲取有碼日榜前30部影片的磁力鏈接**，重點提取標記為"高清"或"中文"的磁力鏈接的"複製"按鈕下載位置。
+這是一個專門針對 JavDB 網站的磁力鏈接提取工具，**專門用於獲取有碼月榜前30部影片的磁力鏈接**，重點提取標記為"高清"或"中文"的磁力鏈接的"複製"按鈕下載位置。
 
 ## ✨ 核心功能
 
-- 🎬 **有碼日榜前30** - 自動獲取有碼類別日榜前30部影片
+- 🎬 **有碼月榜前30** - 自動獲取有碼類別月榜前30部影片
 - 🔍 **智能過濾** - 自動過濾出標記為"高清"或"中文"的磁力鏈接
 - 📋 **複製按鈕** - 重點提取"複製"按鈕的實際下載鏈接
 - 💾 **多格式導出** - 支持 TXT、JSON、CSV 格式導出
@@ -26,16 +26,16 @@ python run_javdb_magnet.py
 
 ## 📖 使用方法
 
-### 1. 獲取有碼日榜前30的磁力鏈接
+### 1. 獲取有碼月榜前30的磁力鏈接
 
 #### 只獲取高清/中文標籤的磁力鏈接：
 ```bash
-python javdb_magnet_cli.py top30 --filter 高清,中文 --export txt --show-details
+python javdb_magnet_cli.py top30 --filter 高清,中文 --export txt
 ```
 
 #### 獲取所有磁力鏈接：
 ```bash
-python javdb_magnet_cli.py top30 --export txt --show-details
+python javdb_magnet_cli.py top30 --export txt
 ```
 
 #### 導出為不同格式：
@@ -67,7 +67,7 @@ python javdb_magnet_cli.py interactive
 ```
 
 在交互式模式下可以使用：
-- `top30` - 獲取有碼日榜前30的磁力鏈接
+- `top30` - 獲取有碼月榜前30的磁力鏈接
 - `code SSIS-001` - 根據番號獲取磁力鏈接
 - `help` - 顯示幫助
 - `quit` - 退出
@@ -82,7 +82,7 @@ from javdb_magnet_crawler import JavDBMagnetManager
 # 創建管理器
 manager = JavDBMagnetManager()
 
-# 獲取有碼日榜前30的磁力鏈接
+# 獲取有碼月榜前30的磁力鏈接
 results = manager.get_top30_magnets()
 
 # 處理結果
@@ -160,7 +160,7 @@ class MagnetLink:
 ### TXT 格式示例
 
 ```
-JavDB 有碼日榜前30磁力鏈接
+JavDB 有碼月榜前30磁力鏈接
 ==================================================
 
 排名: 1
@@ -294,7 +294,7 @@ logging.basicConfig(level=logging.DEBUG)
 
 ---
 
-**重點提醒**：這個工具專門用於獲取 JavDB 有碼日榜前30部影片的磁力鏈接，特別是標記為"高清"或"中文"的磁力鏈接的"複製"按鈕下載位置。請合理使用，遵守相關法律法規。
+**重點提醒**：這個工具專門用於獲取 JavDB 有碼月榜前30部影片的磁力鏈接，特別是標記為"高清"或"中文"的磁力鏈接的"複製"按鈕下載位置。請合理使用，遵守相關法律法規。
 
 
 

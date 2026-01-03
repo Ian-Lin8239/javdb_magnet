@@ -1,20 +1,17 @@
 """
 JavDB 磁力鏈接專用CLI工具
-專門用於獲取有碼日榜前30的磁力鏈接下載位置
+專門用於獲取有碼月榜前30的磁力鏈接下載位置
 """
 import argparse
 import json
 import csv
 from typing import List, Dict, Any
-from datetime import datetime
-from pathlib import Path
 
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
 from rich.prompt import Prompt, Confirm
-from rich import print as rprint
 
 from javdb_magnet_crawler import JavDBMagnetManager, MagnetLink
 
@@ -28,7 +25,7 @@ class JavDBMagnetCLI:
     def run(self):
         """運行CLI"""
         parser = argparse.ArgumentParser(
-            description="JavDB 磁力鏈接專用工具 - 獲取有碼日榜前30的磁力鏈接",
+            description="JavDB 磁力鏈接專用工具 - 獲取有碼月榜前30的磁力鏈接",
             formatter_class=argparse.RawDescriptionHelpFormatter,
             epilog="""
 示例用法:
@@ -42,14 +39,13 @@ class JavDBMagnetCLI:
         subparsers = parser.add_subparsers(dest='command', help='可用命令')
         
         # 前30命令
-        top30_parser = subparsers.add_parser('top30', help='獲取有碼日榜前30的磁力鏈接')
+        top30_parser = subparsers.add_parser('top30', help='獲取有碼月榜前30的磁力鏈接')
         top30_parser.add_argument('--filter', '-f', help='過濾標籤 (用逗號分隔，如: 高清,中文)')
         top30_parser.add_argument('--export', '-e', choices=['txt', 'json', 'csv'], 
                                 help='導出格式（需配合 --output 指定文件名）')
         top30_parser.add_argument('--output', '-o', help='輸出文件名（使用 --export 時必填）')
-        top30_parser.add_argument('--show-details', action='store_true', help='顯示詳細信息')
-        top30_parser.add_argument('--rank-type', default='daily', choices=['daily', 'monthly'],
-                                help='排行榜類型: daily (日榜) 或 monthly (月榜)，默認為 daily')
+        top30_parser.add_argument('--rank-type', default='monthly', choices=['monthly'],
+                                help='排行榜類型: monthly (月榜)，默認為 monthly')
         
         # 番號命令
         code_parser = subparsers.add_parser('code', help='根據番號獲取磁力鏈接')
@@ -87,8 +83,8 @@ class JavDBMagnetCLI:
         if stats['total_scraped'] > 0:
             self.console.print(f"[cyan]已記錄 {stats['total_scraped']} 部影片，將自動跳過重複[/cyan]")
         
-        rank_type = getattr(args, 'rank_type', 'daily')
-        rank_name = "日榜" if rank_type == 'daily' else "月榜"
+        rank_type = getattr(args, 'rank_type', 'monthly')
+        rank_name = "月榜"
         self.console.print(f"[blue]正在獲取有碼{rank_name}前30的磁力鏈接...[/blue]")
         
         # 解析過濾標籤
@@ -120,7 +116,7 @@ class JavDBMagnetCLI:
             return
         
         # 顯示結果
-        self._display_results(results, args.show_details)
+        self._display_results(results)
         
         # 顯示統計信息
         stats = self.manager.get_summary_stats(results)
@@ -175,7 +171,7 @@ class JavDBMagnetCLI:
         """處理交互模式"""
         self.console.print(Panel.fit(
             "[bold blue]JavDB 磁力鏈接工具 - 交互模式[/bold blue]\n"
-            "專門用於獲取有碼日榜前30的磁力鏈接\n"
+            "專門用於獲取有碼月榜前30的磁力鏈接\n"
             "輸入 'help' 查看可用命令\n"
             "輸入 'quit' 退出",
             title="歡迎"
@@ -204,75 +200,35 @@ class JavDBMagnetCLI:
         
         self.console.print("[green]再見！[/green]")
     
-    def _display_results(self, results: List[Dict[str, Any]], show_details: bool = False):
+    def _display_results(self, results: List[Dict[str, Any]]):
         """顯示結果"""
         if not results:
             self.console.print("[yellow]沒有找到結果[/yellow]")
             return
         
         # 創建表格
-        table = Table(title=f"有碼日榜前30磁力鏈接 - 共 {len(results)} 部影片")
+        table = Table(title=f"有碼月榜前30磁力鏈接 - 共 {len(results)} 部影片")
         table.add_column("排名", style="cyan", width=6)
         table.add_column("番號", style="green", width=12)
         table.add_column("標題", style="yellow", max_width=30)
-        table.add_column("演員", style="magenta", max_width=20)
         table.add_column("評分", style="red", width=8)
-        table.add_column("磁力鏈接", style="blue", width=10)
-        table.add_column("過濾後", style="green", width=10)
         
         for result in results:
             movie = result['movie']
             
-            # 處理標題長度
-            display_title = movie['title']
+            # 處理標題長度（處理空值）
+            display_title = movie.get('title', '') or ''
             if len(display_title) > 27:
                 display_title = display_title[:27] + "..."
             
-            # 處理演員列表
-            actors_str = ", ".join(movie['actors'][:2])
-            if len(movie['actors']) > 2:
-                actors_str += "..."
-            
-            # 磁力鏈接狀態
-            magnet_status = f"{result['filtered_magnets']}/{result['total_magnets']}"
-            
             table.add_row(
                 str(result['rank']),
-                movie['code'],
+                movie.get('code', ''),
                 display_title,
-                actors_str,
-                f"{movie['score']:.1f}" if movie['score'] > 0 else "-",
-                str(result['total_magnets']),
-                str(result['filtered_magnets'])
+                f"{movie.get('score', 0):.1f}" if movie.get('score', 0) > 0 else "-"
             )
         
         self.console.print(table)
-        
-        # 顯示詳細信息
-        if show_details:
-            self._display_detailed_results(results)
-    
-    def _display_detailed_results(self, results: List[Dict[str, Any]]):
-        """顯示詳細結果"""
-        for result in results:
-            if result['magnet_links']:
-                movie = result['movie']
-                
-                panel_content = f"[bold]排名: {result['rank']}[/bold]\n"
-                panel_content += f"[bold]番號: {movie['code']}[/bold]\n"
-                panel_content += f"[bold]標題: {movie['title']}[/bold]\n"
-                panel_content += f"[bold]演員: {', '.join(movie['actors'])}[/bold]\n"
-                panel_content += f"[bold]評分: {movie['score']}[/bold]\n\n"
-                
-                panel_content += f"[green]磁力鏈接 ({len(result['magnet_links'])} 個):[/green]\n"
-                for i, magnet in enumerate(result['magnet_links'], 1):
-                    panel_content += f"  {i}. {magnet.title}\n"
-                    panel_content += f"     大小: {magnet.size}\n"
-                    panel_content += f"     標籤: {', '.join(magnet.tags)}\n"
-                    panel_content += f"     下載: {magnet.copy_url or magnet.magnet_url}\n"
-                    panel_content += f"     日期: {magnet.date}\n\n"
-                
-                self.console.print(Panel(panel_content, title=f"詳細信息 - {movie['code']}"))
     
     def _display_magnet_links(self, magnet_links: List[MagnetLink], movie_code: str):
         """顯示磁力鏈接"""
@@ -317,8 +273,6 @@ class JavDBMagnetCLI:
         stats_table.add_column("數值", style="magenta")
         
         stats_table.add_row("總影片數", str(stats['total_movies']))
-        stats_table.add_row("總磁力鏈接數", str(stats['total_magnets']))
-        stats_table.add_row("過濾後磁力鏈接數", str(stats['filtered_magnets']))
         stats_table.add_row("有磁力鏈接的影片數", str(stats['movies_with_magnets']))
         stats_table.add_row("成功率", f"{stats['success_rate']:.1%}")
         
@@ -547,7 +501,7 @@ class JavDBMagnetCLI:
         """顯示交互模式幫助"""
         help_text = """
 可用命令:
-  top30                    - 獲取有碼日榜前30的磁力鏈接
+  top30                    - 獲取有碼月榜前30的磁力鏈接
   code <番號>              - 根據番號獲取磁力鏈接
   help                     - 顯示此幫助
   quit                     - 退出程序
@@ -565,7 +519,7 @@ class JavDBMagnetCLI:
         args.filter = None
         args.export = 'txt'
         args.output = None
-        args.show_details = False
+        args.rank_type = 'monthly'  # 默認使用月榜
         
         self.handle_top30(args)
     

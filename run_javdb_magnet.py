@@ -1,7 +1,6 @@
 """
 JavDB 磁力鏈接工具快速啟動腳本
-專門用於獲取有碼日榜和月榜前30的磁力鏈接
-自動執行：先跑日榜，再跑月榜
+專門用於獲取有碼月榜前30的磁力鏈接
 """
 import sys
 import os
@@ -61,7 +60,7 @@ def main():
     """主函數"""
     print("JavDB 磁力鏈接工具")
     print("=" * 50)
-    print("自動獲取有碼日榜和月榜前30的磁力鏈接")
+    print("自動獲取有碼月榜前30的磁力鏈接")
     print("重點：獲取標記為'高清'或'字幕'的磁力鏈接")
     print("=" * 50)
     
@@ -69,37 +68,24 @@ def main():
     if not check_dependencies():
         return
     
-    # 自動執行：先日榜，後月榜
+    # 自動執行月榜
     print("\n開始自動執行...")
     print("=" * 50)
     
-    # 1. 執行日榜
-    print("\n【步驟 1/2】正在獲取有碼日榜前30的磁力鏈接...")
+    # 執行月榜
+    print("\n正在獲取有碼月榜前30的磁力鏈接...")
     print("這可能需要幾分鐘時間，請耐心等待...\n")
-    cmd_args = ['javdb_magnet_cli.py', 'top30', '--rank-type', 'daily', '--filter', '高清,字幕', '--show-details']
-    success1 = run_command(cmd_args)
+    cmd_args = ['javdb_magnet_cli.py', 'top30', '--rank-type', 'monthly', '--filter', '高清,字幕']
+    success = run_command(cmd_args)
     
-    if success1:
-        print("\n✅ 日榜完成！")
-    else:
-        print("\n❌ 日榜執行失敗")
-    
-    print("\n" + "=" * 50)
-    
-    # 2. 執行月榜
-    print("\n【步驟 2/2】正在獲取有碼月榜前30的磁力鏈接...")
-    print("這可能需要幾分鐘時間，請耐心等待...\n")
-    cmd_args = ['javdb_magnet_cli.py', 'top30', '--rank-type', 'monthly', '--filter', '高清,字幕', '--show-details']
-    success2 = run_command(cmd_args)
-    
-    if success2:
+    if success:
         print("\n✅ 月榜完成！")
     else:
         print("\n❌ 月榜執行失敗")
     
     print("\n" + "=" * 50)
     print("\n✅ 全部完成！")
-    print("日榜和月榜的磁力鏈接已合併保存到同一個文件（自動去重）")
+    print("月榜的磁力鏈接已保存")
 
 if __name__ == "__main__":
     try:

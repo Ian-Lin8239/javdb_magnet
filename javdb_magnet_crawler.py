@@ -1,18 +1,16 @@
 """
 JavDB 磁力鏈接專用爬蟲
-專門用於獲取有碼日榜前30的磁力鏈接下載位置
+專門用於獲取有碼月榜前30的磁力鏈接下載位置
 """
 import requests
 import time
 import random
 import re
 import os
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse, parse_qs
+from urllib.parse import urljoin
 from datetime import datetime
-
-from config import Config
 from utils import (
     get_random_user_agent, random_delay, clean_text, setup_logging
 )
@@ -200,110 +198,6 @@ class JavDBMagnetCrawler:
         self.logger.info(f"磁力鏈接已即時保存到: {filename}")
         return results
     
-    def get_daily_rankings_with_magnets(self, limit: int = 30) -> List[Dict[str, Any]]:
-        """獲取有碼日榜前30的影片及其磁力鏈接"""
-        self.logger.info(f"開始獲取有碼日榜前{limit}的影片磁力鏈接")
-        
-        # 1. 獲取排行榜頁面
-        rankings_url = f"{self.base_url}/rankings/movies"
-        params = {
-            "p": "daily",  # 日榜
-            "t": "censored",  # 有碼
-            "page": 1
-        }
-        
-        response = self._make_request(rankings_url, params)
-        if not response:
-            self.logger.error("無法獲取排行榜頁面")
-            return []
-        
-        # 2. 解析排行榜，獲取影片列表
-        movies = self._parse_rankings_page(response.text, limit)
-        self.logger.info(f"從排行榜獲取到 {len(movies)} 部影片")
-        
-        # 3. 創建即時寫入文件
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"magnet/javdb_magnets_{timestamp}.txt"
-        os.makedirs("magnet", exist_ok=True)
-        
-        # 4. 為每部影片獲取磁力鏈接並即時寫入
-        results = []
-        with open(filename, 'w', encoding='utf-8') as f:
-            # 寫入文件頭
-            f.write("JavDB 有碼日榜前30磁力鏈接\n")
-            f.write("=" * 50 + "\n")
-            f.write(f"生成時間: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write("=" * 50 + "\n\n")
-            f.write("磁力鏈接列表（即時更新）\n")
-            f.write("=" * 80 + "\n\n")
-            f.flush()  # 強制寫入
-            
-            for i, movie in enumerate(movies, 1):
-                self.logger.info(f"處理第 {i}/{len(movies)} 部影片: {movie['title']}")
-                
-                # 獲取磁力鏈接
-                magnet_links = self.get_movie_magnet_links(movie['detail_url'])
-                
-                # 根據優先順序過濾磁力鏈接
-                filtered_magnets = self._filter_magnets_by_priority(magnet_links)
-                
-                result = {
-                    'rank': i,
-                    'movie': movie,
-                    'magnet_links': filtered_magnets,
-                    'total_magnets': len(magnet_links),
-                    'filtered_magnets': len(filtered_magnets)
-                }
-                
-                # 嘗試從磁力鏈接中提取真實番號
-                if filtered_magnets and (not movie['code'] or len(movie['code']) < 5):
-                    magnet = filtered_magnets[0]
-                    real_code = self._extract_real_code_from_magnet(magnet.copy_url or magnet.magnet_url)
-                    if real_code:
-                        movie['code'] = real_code
-                
-                results.append(result)
-                
-                # 即時寫入到文件
-                f.write(f"排名: {i}\n")
-                f.write(f"番號: {movie['code']}\n")
-                f.write(f"標題: {movie['title']}\n")
-                f.write(f"演員: {', '.join(movie['actors'])}\n")
-                f.write(f"評分: {movie['score']}\n")
-                f.write(f"總磁力鏈接: {len(magnet_links)} 個\n")
-                f.write(f"選擇磁力鏈接: {len(filtered_magnets)} 個\n")
-                
-                if filtered_magnets:
-                    magnet = filtered_magnets[0]  # 只取第一個（最佳選擇）
-                    f.write(f"磁力鏈接: {magnet.copy_url or magnet.magnet_url}\n")
-                    f.write(f"大小: {magnet.size}\n")
-                    f.write(f"標籤: {', '.join(magnet.tags)}\n")
-                    f.write(f"日期: {magnet.date}\n")
-                else:
-                    f.write("無符合條件的磁力鏈接\n")
-                
-                f.write("-" * 80 + "\n\n")
-                f.flush()  # 強制寫入，確保即時保存
-                
-                # 避免請求過於頻繁
-                random_delay(2, 4)
-            
-            # 寫入統計信息
-            total_magnets = sum(result['total_magnets'] for result in results)
-            filtered_magnets = sum(result['filtered_magnets'] for result in results)
-            
-            f.write("=" * 80 + "\n")
-            f.write("統計信息\n")
-            f.write("=" * 80 + "\n")
-            f.write(f"總影片數: {len(results)}\n")
-            f.write(f"總磁力鏈接數: {total_magnets}\n")
-            f.write(f"選擇磁力鏈接數: {filtered_magnets}\n")
-            f.write(f"成功率: {filtered_magnets/total_magnets*100:.1f}%\n")
-            f.write(f"完成時間: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        
-        self.logger.info(f"磁力鏈接已即時保存到: {filename}")
-        return results
-    
     def _parse_rankings_page(self, html_content: str, limit: int) -> List[Dict[str, Any]]:
         """解析排行榜頁面"""
         soup = BeautifulSoup(html_content, 'html.parser')
@@ -371,32 +265,81 @@ class JavDBMagnetCrawler:
         if img_elem:
             movie['cover_url'] = urljoin(self.base_url, img_elem.get('src', ''))
         
-        # 獲取標題
+        # 獲取標題 - 嘗試多種選擇器
         title_elem = item.find('div', class_='video-title')
-        if title_elem:
-            title_link = title_elem.find('a')
-            if title_link:
-                movie['title'] = clean_text(title_link.get_text())
+        if not title_elem:
+            title_elem = item.find('div', class_='title')
+        if not title_elem:
+            title_elem = item.find('strong')
+        if not title_elem:
+            # 嘗試從鏈接文本獲取
+            title_elem = link_elem
         
-        # 獲取評分
+        if title_elem:
+            if title_elem.name == 'a':
+                title_text = title_elem.get('title', '') or title_elem.get_text()
+            else:
+                title_link = title_elem.find('a')
+                if title_link:
+                    title_text = title_link.get('title', '') or title_link.get_text()
+                else:
+                    title_text = title_elem.get_text()
+            
+            if title_text:
+                movie['title'] = clean_text(title_text)
+        
+        # 獲取評分 - 嘗試多種選擇器
         score_elem = item.find('span', class_='score')
+        if not score_elem:
+            score_elem = item.find('span', class_='rating')
+        if not score_elem:
+            score_elem = item.find('div', class_='score')
+        if not score_elem:
+            score_elem = item.find('span', class_='value')
         if score_elem:
             try:
-                movie['score'] = float(score_elem.get_text())
-            except ValueError:
+                score_text = score_elem.get_text().strip()
+                # 移除可能的非數字字符，只保留數字和小數點
+                score_text = re.sub(r'[^\d.]', '', score_text)
+                if score_text:
+                    movie['score'] = float(score_text)
+            except (ValueError, AttributeError):
                 pass
         
         # 獲取標籤
         tags_elem = item.find('div', class_='tags')
+        if not tags_elem:
+            tags_elem = item.find('div', class_='tag-list')
         if tags_elem:
             tag_links = tags_elem.find_all('a')
             movie['tags'] = [clean_text(tag.get_text()) for tag in tag_links]
         
-        # 獲取演員
+        # 獲取演員 - 嘗試多種選擇器
         actors_elem = item.find('div', class_='actors')
+        if not actors_elem:
+            actors_elem = item.find('div', class_='actor-list')
+        if not actors_elem:
+            actors_elem = item.find('div', class_='performers')
+        if not actors_elem:
+            # 嘗試查找包含"演員"或"主演"文字的div
+            for div in item.find_all('div'):
+                div_text = div.get_text()
+                if '演員' in div_text or '主演' in div_text:
+                    actors_elem = div
+                    break
+        
         if actors_elem:
             actor_links = actors_elem.find_all('a')
-            movie['actors'] = [clean_text(actor.get_text()) for actor in actor_links]
+            if actor_links:
+                movie['actors'] = [clean_text(actor.get_text()) for actor in actor_links]
+            else:
+                # 如果沒有鏈接，嘗試直接獲取文本並分割
+                actor_text = actors_elem.get_text().strip()
+                if actor_text:
+                    # 移除"演員："等前綴
+                    actor_text = re.sub(r'^[演員主演：:]+', '', actor_text)
+                    if actor_text:
+                        movie['actors'] = [clean_text(a.strip()) for a in actor_text.split(',') if a.strip()]
         
         return movie
     
@@ -620,136 +563,19 @@ class JavDBMagnetManager:
         self.tracker = DuplicateTracker()
         self.written_urls = set()  # 用於跟踪已寫入的URL，避免重複
     
-    def get_top30_magnets(self, skip_duplicates: bool = True, rank_type: str = "daily") -> List[Dict[str, Any]]:
+    def get_top30_magnets(self, skip_duplicates: bool = True, rank_type: str = "monthly") -> List[Dict[str, Any]]:
         """獲取有碼排行榜前30的磁力鏈接
         
         Args:
             skip_duplicates: 是否跳過已爬取的影片
-            rank_type: 排行榜類型 ("daily" 或 "monthly")
+            rank_type: 排行榜類型 ("monthly" 月榜)
         """
-        if rank_type == "monthly":
-            return self.get_top30_monthly_with_duplicate_check() if skip_duplicates else self.crawler.get_monthly_rankings_with_magnets(30)
-        else:
-            if skip_duplicates:
-                # 使用追蹤器檢查重複
-                return self.get_top30_with_duplicate_check()
-            else:
-                # 不使用追蹤器，返回所有結果
-                return self.crawler.get_daily_rankings_with_magnets(30)
-    
-    def get_top30_with_duplicate_check(self) -> List[Dict[str, Any]]:
-        """獲取前30日榜，跳過已爬取的影片（共享重複檢測）"""
-        # 檢查統計信息
-        stats = self.tracker.get_statistics()
-        if stats['total_scraped'] > 0:
-            self.logger.info(f"📊 已記錄 {stats['total_scraped']} 部影片，將自動跳過重複")
+        # 只支持月榜
+        if rank_type != "monthly":
+            rank_type = "monthly"
+            self.logger.warning("已將排行榜類型改為月榜（monthly）")
         
-        self.logger.info("開始獲取有碼日榜前30的影片磁力鏈接（檢查重複）")
-        
-        # 1. 獲取排行榜頁面
-        rankings_url = f"{self.crawler.base_url}/rankings/movies"
-        params = {
-            "p": "daily",  # 日榜
-            "t": "censored",  # 有碼
-            "page": 1
-        }
-        
-        response = self.crawler._make_request(rankings_url, params)
-        if not response:
-            self.logger.error("無法獲取排行榜頁面")
-            return []
-        
-        # 2. 解析排行榜，獲取影片列表
-        all_movies = self.crawler._parse_rankings_page(response.text, 30)
-        self.logger.info(f"從日榜排行榜獲取到 {len(all_movies)} 部影片")
-        
-        # 3. 過濾出未爬取的影片（與月榜共用同一個tracker）
-        new_movies, skipped_count = self.tracker.get_new_movies(all_movies)
-        self.logger.info(f"✓ 跳過 {skipped_count} 部已爬取的影片（包括從月榜爬取的）")
-        self.logger.info(f"✓ 剩餘 {len(new_movies)} 部新影片")
-        
-        if not new_movies:
-            self.logger.info("沒有新影片需要爬取")
-            return []
-        
-        # 4. 創建即時寫入文件（使用統一文件名）
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"magnet/javdb_magnets_{timestamp}.txt"
-        os.makedirs("magnet", exist_ok=True)
-        
-        # 5. 為每部新影片獲取磁力鏈接並即時寫入
-        results = []
-        scraped_codes = []  # 記錄成功爬取的番號
-        
-        # 清空已寫入URL集合（日榜開始新文件）
-        self.written_urls.clear()
-        
-        with open(filename, 'w', encoding='utf-8') as f:
-            
-            for i, movie in enumerate(new_movies, 1):
-                self.logger.info(f"處理第 {i}/{len(new_movies)} 部新影片: {movie['title']}")
-                
-                # 獲取磁力鏈接
-                magnet_links = self.crawler.get_movie_magnet_links(movie['detail_url'])
-                
-                # 根據優先順序過濾磁力鏈接
-                filtered_magnets = self.crawler._filter_magnets_by_priority(magnet_links)
-                
-                # 嘗試從磁力鏈接中提取真實番號
-                real_code = None
-                if filtered_magnets:
-                    magnet = filtered_magnets[0]
-                    real_code = self.crawler._extract_real_code_from_magnet(magnet.copy_url or magnet.magnet_url)
-                    if real_code:
-                        movie['code'] = real_code  # 更新為真實番號
-                    elif not movie.get('code') or len(movie.get('code', '')) < 5:
-                        # 如果沒有提取到真實番號，嘗試從標題提取
-                        title = movie.get('title', '')
-                        code_match = re.search(r'([A-Z]{2,6}-\d{3,5})', title)
-                        if code_match:
-                            extracted_code = code_match.group(1)
-                            movie['code'] = extracted_code
-                            real_code = extracted_code
-                
-                result = {
-                    'rank': i,
-                    'movie': movie,
-                    'magnet_links': filtered_magnets,
-                    'total_magnets': len(magnet_links),
-                    'filtered_magnets': len(filtered_magnets)
-                }
-                
-                results.append(result)
-                
-                # 即時寫入到文件（只保存URL，檢查重複）
-                if filtered_magnets:
-                    magnet = filtered_magnets[0]  # 只取第一個（最佳選擇）
-                    url = magnet.copy_url or magnet.magnet_url
-                    # 檢查URL是否已經寫入過（避免重複）
-                    if url and url not in self.written_urls:
-                        f.write(f"{url}\n")
-                        self.written_urls.add(url)  # 記錄已寫入的URL
-                        # 使用真實番號記錄（如果有），否則使用原始 code
-                        code_to_record = real_code or movie.get('code', '')
-                        if code_to_record:
-                            scraped_codes.append(code_to_record)
-                    elif url in self.written_urls:
-                        self.logger.info(f"跳過重複URL: {url}")
-                
-                f.flush()  # 強制寫入，確保即時保存
-                
-                # 避免請求過於頻繁
-                from utils import random_delay
-                random_delay(2, 4)
-        
-        self.logger.info(f"磁力鏈接已即時保存到: {filename}")
-        
-        # 6. 標記已爬取的影片
-        if scraped_codes:
-            self.tracker.batch_mark_as_scraped([{'code': code} for code in scraped_codes])
-            self.logger.info(f"已標記 {len(scraped_codes)} 部影片為已爬取")
-        
-        return results
+        return self.get_top30_monthly_with_duplicate_check() if skip_duplicates else self.crawler.get_monthly_rankings_with_magnets(30)
     
     def get_top30_monthly_with_duplicate_check(self) -> List[Dict[str, Any]]:
         """獲取前30月榜，跳過已爬取的影片（共享重複檢測）"""
@@ -777,38 +603,63 @@ class JavDBMagnetManager:
         all_movies = self.crawler._parse_rankings_page(response.text, 30)
         self.logger.info(f"從月榜排行榜獲取到 {len(all_movies)} 部影片")
         
-        # 3. 過濾出未爬取的影片（與日榜共用同一個tracker）
+        # 3. 過濾出未爬取的影片
         new_movies, skipped_count = self.tracker.get_new_movies(all_movies)
-        self.logger.info(f"✓ 跳過 {skipped_count} 部已爬取的影片（包括從日榜爬取的）")
+        self.logger.info(f"✓ 跳過 {skipped_count} 部已爬取的影片")
         self.logger.info(f"✓ 剩餘 {len(new_movies)} 部新影片")
         
         if not new_movies:
             self.logger.info("沒有新影片需要爬取")
             return []
         
-        # 4. 使用與日榜相同的文件名（追加模式）
-        # 找到最新的日榜文件，如果不存在則創建新的
+        # 4. 使用固定檔名，始終追加模式
         os.makedirs("magnet", exist_ok=True)
-        magnet_files = [f for f in os.listdir("magnet") if f.startswith("javdb_magnets_") and f.endswith(".txt")]
-        if magnet_files:
-            # 找到最新的文件（按時間戳排序）
-            magnet_files.sort(reverse=True)
-            filename = f"magnet/{magnet_files[0]}"
-            file_mode = 'a'  # 追加模式
-            self.logger.info(f"追加到文件: {filename}")
-        else:
-            # 如果沒有日榜文件，創建新的（理論上不應該發生）
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"magnet/javdb_magnets_{timestamp}.txt"
-            file_mode = 'w'  # 寫入模式
+        filename = "magnet/Url List.txt"  # 固定檔名
+        
+        # 檢查文件是否存在，如果不存在則需要初始化 written_urls
+        if not os.path.exists(filename):
+            # 文件不存在，清空 written_urls（新文件）
             self.written_urls.clear()
             self.logger.info(f"創建新文件: {filename}")
+        else:
+            # 文件已存在，讀取現有URL到 written_urls 中（避免重複）
+            try:
+                with open(filename, 'r', encoding='utf-8') as f:
+                    existing_urls = [line.strip() for line in f if line.strip()]
+                    self.written_urls.update(existing_urls)
+                self.logger.info(f"追加到現有文件: {filename} (已有 {len(self.written_urls)} 個URL)")
+            except Exception as e:
+                self.logger.warning(f"讀取現有文件失敗: {e}，將繼續追加")
+        
+        file_mode = 'a'  # 始終使用追加模式
+        
+        # 檢查文件最後一行是否為今天的日期標題
+        current_date = datetime.now().strftime('%Y/%m/%d')
+        needs_date_header = True
+        if os.path.exists(filename) and os.path.getsize(filename) > 0:
+            try:
+                with open(filename, 'r', encoding='utf-8') as check_file:
+                    lines = check_file.readlines()
+                    if lines:
+                        # 從後往前找最後一個非空行
+                        for line in reversed(lines):
+                            last_line = line.strip()
+                            if last_line:
+                                # 檢查是否為今天的日期格式 YYYY/MM/DD
+                                if last_line == current_date:
+                                    needs_date_header = False
+                                break
+            except Exception:
+                pass
         
         # 5. 為每部新影片獲取磁力鏈接並即時寫入
         results = []
         scraped_codes = []  # 記錄成功爬取的番號
         
         with open(filename, file_mode, encoding='utf-8') as f:
+            # 如果需要，寫入日期標題
+            if needs_date_header:
+                f.write(f"\n{current_date}\n")
             
             for i, movie in enumerate(new_movies, 1):
                 self.logger.info(f"處理第 {i}/{len(new_movies)} 部新影片: {movie['title']}")
@@ -849,6 +700,9 @@ class JavDBMagnetManager:
                 if filtered_magnets:
                     magnet = filtered_magnets[0]  # 只取第一個（最佳選擇）
                     url = magnet.copy_url or magnet.magnet_url
+                    # 標準化URL（去除首尾空格）
+                    if url:
+                        url = url.strip()
                     # 檢查URL是否已經寫入過（避免重複）
                     if url and url not in self.written_urls:
                         f.write(f"{url}\n")
@@ -857,7 +711,7 @@ class JavDBMagnetManager:
                         code_to_record = real_code or movie.get('code', '')
                         if code_to_record:
                             scraped_codes.append(code_to_record)
-                    elif url in self.written_urls:
+                    elif url and url in self.written_urls:
                         self.logger.info(f"跳過重複URL: {url}")
                 
                 f.flush()  # 強制寫入，確保即時保存
@@ -891,7 +745,7 @@ class JavDBMagnetManager:
         os.makedirs("magnet", exist_ok=True)
         
         with open(filename, 'w', encoding='utf-8') as f:
-            f.write("JavDB 有碼日榜前30磁力鏈接\n")
+            f.write("JavDB 有碼月榜前30磁力鏈接\n")
             f.write("=" * 50 + "\n")
             f.write(f"生成時間: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write("=" * 50 + "\n\n")
