@@ -5,4 +5,3 @@ echo 正在啟動 JavDB 磁力鏈接工具...
 echo.
 py run_javdb_magnet.py
 pause
-

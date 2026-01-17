@@ -87,9 +87,12 @@ class DuplicateTracker:
     
     def save_data(self):
         """保存數據"""
-        self.scraped_data['last_update'] = datetime.now().isoformat()
-        with open(self.db_file, 'w', encoding='utf-8') as f:
-            json.dump(self.scraped_data, f, ensure_ascii=False, indent=2)
+        try:
+            self.scraped_data['last_update'] = datetime.now().isoformat()
+            with open(self.db_file, 'w', encoding='utf-8') as f:
+                json.dump(self.scraped_data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            raise
     
     def is_already_scraped(self, movie_code: str) -> bool:
         """檢查影片是否已經爬取過"""
@@ -113,6 +116,11 @@ class DuplicateTracker:
             self.scraped_data['scraped_movies'] = {}
         
         self.scraped_data['scraped_movies'][movie_code] = scraped_date
+    
+    def mark_and_save(self, movie_code: str, scraped_date: str = None):
+        """標記影片為已爬取並立即保存到文件"""
+        self.mark_as_scraped(movie_code, scraped_date)
+        self.save_data()
     
     def get_new_movies(self, movies: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """過濾出新影片（未爬取過的）"""

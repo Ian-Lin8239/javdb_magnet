@@ -77,8 +77,8 @@ class JavDBMagnetCrawler:
                 
                 response.raise_for_status()
                 
-                # 請求間隔
-                random_delay(1, 3)
+                # 請求間隔 - 增加延遲以降低被封鎖的風險
+                random_delay(2, 4)  # 從 1-3秒 增加到 2-4秒
                 
                 return response
                 
@@ -203,7 +203,6 @@ class JavDBMagnetCrawler:
         soup = BeautifulSoup(html_content, 'html.parser')
         movies = []
         
-        # 調試：檢查頁面內容
         self.logger.info(f"頁面內容長度: {len(html_content)}")
         
         # 查找電影列表容器
@@ -219,10 +218,6 @@ class JavDBMagnetCrawler:
             movie_items = soup.find_all('div', class_='video-item')
             self.logger.info(f"使用 video-item 找到 {len(movie_items)} 個項目")
         
-        # 調試：保存頁面內容
-        with open('debug_page.html', 'w', encoding='utf-8') as f:
-            f.write(html_content)
-        self.logger.info("已保存調試頁面到 debug_page.html")
         
         for index, item in enumerate(movie_items[:limit]):
             try:
@@ -359,10 +354,14 @@ class JavDBMagnetCrawler:
         soup = BeautifulSoup(html_content, 'html.parser')
         magnet_links = []
         
-        # 調試：保存頁面內容
-        with open('magnet_debug.html', 'w', encoding='utf-8') as f:
-            f.write(html_content)
-        self.logger.info("已保存磁力鏈接頁面到 magnet_debug.html")
+        # 檢查頁面是否包含錯誤信息（如需要登錄、驗證碼等）
+        error_indicators = ['驗證碼', '登錄', '請登入', '需要登錄', 'captcha', 'login', '請稍後再試', '訪問過於頻繁']
+        page_text_lower = html_content.lower()
+        for indicator in error_indicators:
+            if indicator.lower() in page_text_lower:
+                self.logger.warning(f"頁面可能包含錯誤提示（{indicator}），網站可能限制了訪問")
+                # 即使檢測到錯誤，也嘗試繼續提取
+        
         
         # 查找磁力鏈接區域 - 嘗試多種選擇器
         magnet_section = None
@@ -396,10 +395,32 @@ class JavDBMagnetCrawler:
                         magnet_link = self._parse_magnet_item(parent)
                         if magnet_link:
                             magnet_links.append(magnet_link)
-                return magnet_links
-            else:
-                self.logger.warning("未找到磁力鏈接區域和複製按鈕")
+                if magnet_links:
+                    return magnet_links
+            
+            # 如果還是找不到，嘗試從HTML中直接提取magnet鏈接（使用正則表達式）
+            self.logger.warning("未找到磁力鏈接區域和複製按鈕，嘗試從HTML中直接提取")
+            magnet_pattern = r'magnet:\?xt=urn:btih:[a-zA-Z0-9]+[^"\s<>]*'
+            found_magnets = re.findall(magnet_pattern, html_content)
+            if found_magnets:
+                self.logger.info(f"從HTML中直接提取到 {len(found_magnets)} 個磁力鏈接")
+                for magnet_url in found_magnets[:10]:  # 最多取前10個，避免過多
+                    # 創建一個簡單的MagnetLink對象
+                    magnet_link = MagnetLink()
+                    magnet_link.title = f"磁力鏈接 {len(magnet_links) + 1}"
+                    magnet_link.magnet_url = magnet_url
+                    magnet_link.copy_url = magnet_url
+                    magnet_link.size = "未知"
+                    magnet_link.tags = []
+                    magnet_link.file_count = 0
+                    magnet_link.date = ""
+                    magnet_links.append(magnet_link)
+                    self.logger.info(f"成功提取磁力鏈接: {magnet_url[:50]}...")
+            
+            if not magnet_links:
+                self.logger.warning("無法從頁面中提取任何磁力鏈接")
                 return []
+            return magnet_links
         
         # 查找磁力鏈接項目
         magnet_items = []
@@ -563,28 +584,42 @@ class JavDBMagnetManager:
         self.tracker = DuplicateTracker()
         self.written_urls = set()  # 用於跟踪已寫入的URL，避免重複
     
-    def get_top30_magnets(self, skip_duplicates: bool = True, rank_type: str = "monthly") -> List[Dict[str, Any]]:
-        """獲取有碼排行榜前30的磁力鏈接
+    def get_top30_magnets(self, skip_duplicates: bool = True, rank_type: str = "monthly", limit: int = None) -> List[Dict[str, Any]]:
+        """獲取有碼排行榜前N的磁力鏈接
         
         Args:
             skip_duplicates: 是否跳過已爬取的影片
             rank_type: 排行榜類型 ("monthly" 月榜)
+            limit: 下載數量（如果為None，則從配置文件讀取）
         """
         # 只支持月榜
         if rank_type != "monthly":
             rank_type = "monthly"
             self.logger.warning("已將排行榜類型改為月榜（monthly）")
         
-        return self.get_top30_monthly_with_duplicate_check() if skip_duplicates else self.crawler.get_monthly_rankings_with_magnets(30)
+        # 從環境變數讀取 limit（如果未提供）
+        if limit is None:
+            import os
+            from dotenv import load_dotenv
+            load_dotenv('config.env')
+            top_count_raw = os.getenv('TOP_COUNT', '30')
+            limit = int(top_count_raw)
+        
+        return self.get_top30_monthly_with_duplicate_check(limit=limit) if skip_duplicates else self.crawler.get_monthly_rankings_with_magnets(limit)
     
-    def get_top30_monthly_with_duplicate_check(self) -> List[Dict[str, Any]]:
-        """獲取前30月榜，跳過已爬取的影片（共享重複檢測）"""
+    def get_top30_monthly_with_duplicate_check(self, limit: int = 30) -> List[Dict[str, Any]]:
+        """獲取前N月榜，跳過已爬取的影片（共享重複檢測）"""
         # 檢查統計信息
         stats = self.tracker.get_statistics()
         if stats['total_scraped'] > 0:
             self.logger.info(f"📊 已記錄 {stats['total_scraped']} 部影片，將自動跳過重複")
+        else:
+            # 如果 scraped_movies.json 不存在或為空，清空 written_urls 以確保一致性
+            # 這樣可以避免因為舊的 Url List.txt 導致誤判重複
+            self.written_urls.clear()
+            self.logger.info("📋 檢測到無歷史記錄，已清空URL重複檢查列表")
         
-        self.logger.info("開始獲取有碼月榜前30的影片磁力鏈接（檢查重複）")
+        self.logger.info(f"開始獲取有碼月榜前{limit}的影片磁力鏈接（檢查重複）")
         
         # 1. 獲取排行榜頁面
         rankings_url = f"{self.crawler.base_url}/rankings/movies"
@@ -600,14 +635,13 @@ class JavDBMagnetManager:
             return []
         
         # 2. 解析排行榜，獲取影片列表
-        all_movies = self.crawler._parse_rankings_page(response.text, 30)
+        all_movies = self.crawler._parse_rankings_page(response.text, limit)
         self.logger.info(f"從月榜排行榜獲取到 {len(all_movies)} 部影片")
         
         # 3. 過濾出未爬取的影片
         new_movies, skipped_count = self.tracker.get_new_movies(all_movies)
         self.logger.info(f"✓ 跳過 {skipped_count} 部已爬取的影片")
         self.logger.info(f"✓ 剩餘 {len(new_movies)} 部新影片")
-        
         if not new_movies:
             self.logger.info("沒有新影片需要爬取")
             return []
@@ -617,19 +651,29 @@ class JavDBMagnetManager:
         filename = "magnet/Url List.txt"  # 固定檔名
         
         # 檢查文件是否存在，如果不存在則需要初始化 written_urls
+        # 注意：如果 scraped_movies.json 不存在（已在上方清空 written_urls），
+        # 這裡不再從 Url List.txt 讀取 URL，確保一致性
         if not os.path.exists(filename):
             # 文件不存在，清空 written_urls（新文件）
             self.written_urls.clear()
             self.logger.info(f"創建新文件: {filename}")
         else:
-            # 文件已存在，讀取現有URL到 written_urls 中（避免重複）
-            try:
-                with open(filename, 'r', encoding='utf-8') as f:
-                    existing_urls = [line.strip() for line in f if line.strip()]
-                    self.written_urls.update(existing_urls)
-                self.logger.info(f"追加到現有文件: {filename} (已有 {len(self.written_urls)} 個URL)")
-            except Exception as e:
-                self.logger.warning(f"讀取現有文件失敗: {e}，將繼續追加")
+            # 文件已存在，但只有在 scraped_movies.json 也存在時才讀取現有URL
+            # 這樣可以避免因為只有 Url List.txt 而誤判重複
+            scraped_movies_exists = os.path.exists(self.tracker.db_file)
+            if scraped_movies_exists:
+                # 文件已存在，讀取現有URL到 written_urls 中（避免重複）
+                try:
+                    with open(filename, 'r', encoding='utf-8') as f:
+                        existing_urls = [line.strip() for line in f if line.strip() and not line.strip().startswith('20')]  # 過濾掉日期標題行
+                        self.written_urls.update(existing_urls)
+                    self.logger.info(f"追加到現有文件: {filename} (已有 {len(self.written_urls)} 個URL)")
+                except Exception as e:
+                    self.logger.warning(f"讀取現有文件失敗: {e}，將繼續追加")
+            else:
+                # scraped_movies.json 不存在，不清除 written_urls（已在上面清空）
+                # 但也不從 Url List.txt 讀取，確保一致性
+                self.logger.info(f"檢測到 {filename} 存在但 scraped_movies.json 不存在，忽略 Url List.txt 中的舊URL以確保一致性")
         
         file_mode = 'a'  # 始終使用追加模式
         
@@ -696,6 +740,9 @@ class JavDBMagnetManager:
                 
                 results.append(result)
                 
+                # 使用真實番號記錄（如果有），否則使用原始 code
+                code_to_record = real_code or movie.get('code', '')
+                
                 # 即時寫入到文件（只保存URL，檢查重複）
                 if filtered_magnets:
                     magnet = filtered_magnets[0]  # 只取第一個（最佳選擇）
@@ -707,30 +754,37 @@ class JavDBMagnetManager:
                     if url and url not in self.written_urls:
                         f.write(f"{url}\n")
                         self.written_urls.add(url)  # 記錄已寫入的URL
-                        # 使用真實番號記錄（如果有），否則使用原始 code
-                        code_to_record = real_code or movie.get('code', '')
-                        # 驗證番號格式，只記錄有效的番號
-                        if code_to_record and self.tracker._is_valid_code(code_to_record):
-                            scraped_codes.append(code_to_record)
-                        else:
-                            # 如果番號格式異常，記錄警告但繼續處理
-                            if code_to_record:
-                                self.logger.warning(f"跳過記錄異常格式的番號: {code_to_record} (標題: {movie.get('title', '')})")
                     elif url and url in self.written_urls:
                         self.logger.info(f"跳過重複URL: {url}")
                 
+                # 無論是否有磁力鏈接，只要有有效的番號就記錄為已處理（避免重複爬取）
+                # 驗證番號格式，只記錄有效的番號，並立即寫入到 scraped_movies.json
+                if code_to_record and self.tracker._is_valid_code(code_to_record):
+                    self.tracker.mark_and_save(code_to_record)  # 即時寫入
+                    scraped_codes.append(code_to_record)  # 保留用於統計
+                    if not filtered_magnets:
+                        self.logger.info(f"影片 {code_to_record} 沒有找到磁力鏈接，但已記錄為已處理")
+                else:
+                    # 如果番號格式異常，記錄警告但繼續處理
+                    if code_to_record:
+                        self.logger.warning(f"跳過記錄異常格式的番號: {code_to_record} (標題: {movie.get('title', '')})")
+                
                 f.flush()  # 強制寫入，確保即時保存
                 
-                # 避免請求過於頻繁
+                # 避免請求過於頻繁 - 增加延遲時間以降低被封鎖的風險
                 from utils import random_delay
-                random_delay(2, 4)
+                # 如果沒有找到磁力鏈接，延遲更長時間，可能是被限制了
+                if not filtered_magnets:
+                    self.logger.warning(f"影片 {movie.get('title', '')} 未找到磁力鏈接，延遲更長時間...")
+                    random_delay(5, 8)  # 延長到5-8秒
+                else:
+                    random_delay(3, 6)  # 正常情況延遲3-6秒（從2-4秒增加）
         
         self.logger.info(f"磁力鏈接已即時保存到: {filename}")
         
-        # 6. 標記已爬取的影片
+        # 6. 已爬取的影片已通過 mark_and_save 即時寫入，這裡只記錄統計信息
         if scraped_codes:
-            self.tracker.batch_mark_as_scraped([{'code': code} for code in scraped_codes])
-            self.logger.info(f"已標記 {len(scraped_codes)} 部影片為已爬取")
+            self.logger.info(f"已標記 {len(scraped_codes)} 部影片為已爬取（已即時保存到 scraped_movies.json）")
         
         return results
     

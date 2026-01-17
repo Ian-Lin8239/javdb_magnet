@@ -39,8 +39,10 @@ class JavDBMagnetCLI:
         subparsers = parser.add_subparsers(dest='command', help='可用命令')
         
         # 前30命令
-        top30_parser = subparsers.add_parser('top30', help='獲取有碼月榜前30的磁力鏈接')
-        top30_parser.add_argument('--filter', '-f', help='過濾標籤 (用逗號分隔，如: 高清,中文)')
+        top30_parser = subparsers.add_parser('top30', help='獲取有碼月榜前N的磁力鏈接')
+        top30_parser.add_argument('--filter', '-f', help='過濾標籤 (用逗號分隔，如: 高清,中文，預設使用配置文件中的 FILTER_TAGS)')
+        top30_parser.add_argument('--limit', '-l', type=int, help='下載數量（預設使用配置文件中的 TOP_COUNT）')
+        top30_parser.add_argument('--min-score', type=float, help='最小評分（預設使用配置文件中的 MIN_SCORE）')
         top30_parser.add_argument('--export', '-e', choices=['txt', 'json', 'csv'], 
                                 help='導出格式（需配合 --output 指定文件名）')
         top30_parser.add_argument('--output', '-o', help='輸出文件名（使用 --export 時必填）')
@@ -78,6 +80,10 @@ class JavDBMagnetCLI:
     
     def handle_top30(self, args):
         """處理前30命令"""
+        import os
+        from dotenv import load_dotenv
+        load_dotenv('config.env')
+        
         # 檢查統計信息
         stats = self.manager.tracker.get_statistics()
         if stats['total_scraped'] > 0:
@@ -85,12 +91,36 @@ class JavDBMagnetCLI:
         
         rank_type = getattr(args, 'rank_type', 'monthly')
         rank_name = "月榜"
-        self.console.print(f"[blue]正在獲取有碼{rank_name}前30的磁力鏈接...[/blue]")
         
-        # 解析過濾標籤
+        # 讀取配置（優先使用命令行參數）
+        top_count = getattr(args, 'limit', None)
+        if top_count is None:
+            top_count_env = os.getenv('TOP_COUNT', '30')
+            top_count = int(top_count_env)
+        
+        min_score = getattr(args, 'min_score', None)
+        if min_score is None:
+            min_score_str = os.getenv('MIN_SCORE', '0.0')
+            try:
+                min_score = float(min_score_str)
+            except ValueError:
+                min_score = 0.0
+        
+        # 讀取標籤過濾配置
         filter_tags = []
         if args.filter:
             filter_tags = [tag.strip() for tag in args.filter.split(',')]
+        else:
+            # 從配置文件讀取
+            filter_tags_str = os.getenv('FILTER_TAGS', '')
+            if filter_tags_str:
+                filter_tags = [tag.strip() for tag in filter_tags_str.split(',')]
+        
+        self.console.print(f"[blue]正在獲取有碼{rank_name}前{top_count}的磁力鏈接...[/blue]")
+        if filter_tags:
+            self.console.print(f"[cyan]標籤過濾: {', '.join(filter_tags)}[/cyan]")
+        if min_score and min_score > 0:
+            self.console.print(f"[cyan]評分過濾: >= {min_score}[/cyan]")
         
         with Progress(
             SpinnerColumn(),
@@ -100,16 +130,20 @@ class JavDBMagnetCLI:
             TimeElapsedColumn(),
             console=self.console
         ) as progress:
-            task = progress.add_task("爬取中...", total=30)
+            task = progress.add_task("爬取中...", total=top_count)
             
-            # 獲取前30的磁力鏈接（默認會跳過重複）
-            results = self.manager.get_top30_magnets(rank_type=rank_type)
+            # 獲取前N的磁力鏈接（默認會跳過重複）
+            results = self.manager.get_top30_magnets(rank_type=rank_type, limit=top_count)
             
-            # 應用過濾器
+            # 應用標籤過濾器
             if filter_tags:
                 results = self._apply_filter_to_results(results, filter_tags)
             
-            progress.update(task, completed=30)
+            # 應用評分過濾
+            if min_score and min_score > 0:
+                results = self._apply_score_filter(results, min_score)
+            
+            progress.update(task, completed=top_count)
         
         if not results:
             self.console.print("[yellow]沒有新影片需要處理（所有影片都已經爬取過）[/yellow]")
@@ -468,6 +502,26 @@ class JavDBMagnetCLI:
                 result['magnet_links'] = filtered_magnets
                 result['filtered_magnets'] = len(filtered_magnets)
                 filtered_results.append(result)
+        
+        return filtered_results
+    
+    def _apply_score_filter(self, results: List[Dict[str, Any]], min_score: float) -> List[Dict[str, Any]]:
+        """根據評分過濾結果"""
+        if not min_score or min_score <= 0:
+            return results
+        
+        filtered_results = []
+        filtered_count = 0
+        for result in results:
+            movie = result.get('movie', {})
+            score = movie.get('score', 0.0)
+            if score >= min_score:
+                filtered_results.append(result)
+            else:
+                filtered_count += 1
+        
+        if filtered_count > 0:
+            self.console.print(f"[yellow]已過濾 {filtered_count} 部評分低於 {min_score} 的影片[/yellow]")
         
         return filtered_results
     

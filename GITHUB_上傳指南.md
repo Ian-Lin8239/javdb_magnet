@@ -21,15 +21,7 @@ pip install -r requirements.txt
 
 ### 配置設置
 
-```bash
-# Windows
-copy config.env.example config.env
-
-# Linux/macOS
-cp config.env.example config.env
-```
-
-編輯 `config.env` 文件配置參數（可選）
+編輯 `config.env` 文件可以自訂配置參數（可選）
 
 ### 快速啟動
 
@@ -38,7 +30,7 @@ cp config.env.example config.env
 python run_javdb_magnet.py
 
 # 方式二：Windows 批次檔
-啟動.bat
+start.bat
 
 # 方式三：Windows Python Launcher
 py run_javdb_magnet.py

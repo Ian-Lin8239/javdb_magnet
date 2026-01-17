@@ -58,10 +58,21 @@ def run_command(cmd_args):
 
 def main():
     """主函數"""
+    # 載入環境變數
+    import os
+    from dotenv import load_dotenv
+    load_dotenv('config.env')
+    
+    # 從配置文件讀取設定
+    top_count = int(os.getenv('TOP_COUNT', '30'))
+    filter_tags_str = os.getenv('FILTER_TAGS', '高清,字幕')
+    filter_tags = [tag.strip() for tag in filter_tags_str.split(',')] if filter_tags_str else []
+    
     print("JavDB 磁力鏈接工具")
     print("=" * 50)
-    print("自動獲取有碼月榜前30的磁力鏈接")
-    print("重點：獲取標記為'高清'或'字幕'的磁力鏈接")
+    print(f"自動獲取有碼月榜前{top_count}的磁力鏈接")
+    if filter_tags:
+        print(f"重點：獲取標記為'{', '.join(filter_tags)}'的磁力鏈接")
     print("=" * 50)
     
     # 檢查依賴
@@ -73,9 +84,13 @@ def main():
     print("=" * 50)
     
     # 執行月榜
-    print("\n正在獲取有碼月榜前30的磁力鏈接...")
+    print(f"\n正在獲取有碼月榜前{top_count}的磁力鏈接...")
     print("這可能需要幾分鐘時間，請耐心等待...\n")
-    cmd_args = ['javdb_magnet_cli.py', 'top30', '--rank-type', 'monthly', '--filter', '高清,字幕']
+    
+    cmd_args = ['javdb_magnet_cli.py', 'top30', '--rank-type', 'monthly']
+    if filter_tags:
+        cmd_args.extend(['--filter', ','.join(filter_tags)])
+    
     success = run_command(cmd_args)
     
     if success:
