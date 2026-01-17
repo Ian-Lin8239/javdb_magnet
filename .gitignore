@@ -30,10 +30,17 @@ wheels/
 *.swo
 *~
 
+# Development & Testing
+.cursor/              # Cursor IDE 的 debug 日誌目錄
+test_*.py             # 測試文件
+*_test.py             # 測試文件
+dev/                  # 開發目錄（如果有）
+
 # Logs
 *.log
 debug_page.html
 magnet_debug.html
+debug_*.html          # 所有 debug HTML 文件
 
 # Data files
 scraped_movies.json
