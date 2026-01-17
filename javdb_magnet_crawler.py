@@ -709,8 +709,13 @@ class JavDBMagnetManager:
                         self.written_urls.add(url)  # 記錄已寫入的URL
                         # 使用真實番號記錄（如果有），否則使用原始 code
                         code_to_record = real_code or movie.get('code', '')
-                        if code_to_record:
+                        # 驗證番號格式，只記錄有效的番號
+                        if code_to_record and self.tracker._is_valid_code(code_to_record):
                             scraped_codes.append(code_to_record)
+                        else:
+                            # 如果番號格式異常，記錄警告但繼續處理
+                            if code_to_record:
+                                self.logger.warning(f"跳過記錄異常格式的番號: {code_to_record} (標題: {movie.get('title', '')})")
                     elif url and url in self.written_urls:
                         self.logger.info(f"跳過重複URL: {url}")
                 

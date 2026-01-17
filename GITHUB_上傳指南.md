@@ -1,211 +1,124 @@
-# GitHub 上傳指南
+﻿# JavDB 磁力鏈接專用工具
 
-## 📋 前置準備
+專門針對 JavDB 網站的磁力鏈接提取工具，用於獲取有碼月榜前30部影片的磁力鏈接，重點提取標記為"高清"或"中文"的磁力鏈接。
 
-### 1. 安裝 Git（如果還沒安裝）
+> 💡 **關於本專案**：作者是 Code 新手，此專案是透過 [Cursor](https://cursor.sh/) 協助開發完成的。歡迎大家討論、提出建議或貢獻代碼！
 
-下載並安裝 Git for Windows：
-- 官方網站：https://git-scm.com/download/win
-- 安裝完成後，重新啟動命令提示字元或 PowerShell
+## ✨ 核心功能
 
-驗證安裝：
+- 🎬 自動獲取有碼月榜前30部影片
+- 🔍 智能過濾高清/中文標籤的磁力鏈接
+- 💾 支持 TXT、JSON、CSV 格式導出
+- 🎨 命令行和交互式兩種模式
+
+## 🚀 快速開始
+
+### 安裝依賴
+
 ```bash
-git --version
+pip install -r requirements.txt
 ```
 
-### 2. 設置 Git 用戶資訊（首次使用需要）
+### 配置設置
 
 ```bash
-git config --global user.name "您的名字"
-git config --global user.email "your_email@example.com"
+# Windows
+copy config.env.example config.env
+
+# Linux/macOS
+cp config.env.example config.env
 ```
 
-### 3. 登入 GitHub
+編輯 `config.env` 文件配置參數（可選）
 
-1. 前往 https://github.com
-2. 登入您的帳號（如果沒有帳號，請先註冊）
-3. 點擊右上角的 `+` → `New repository`
+### 快速啟動
+
+```bash
+# 方式一：Python 命令
+python run_javdb_magnet.py
+
+# 方式二：Windows 批次檔
+啟動.bat
+
+# 方式三：Windows Python Launcher
+py run_javdb_magnet.py
+```
+
+## 📖 使用方法
+
+### 1. 獲取有碼月榜前30的磁力鏈接
+
+```bash
+# 僅在螢幕顯示（不過濾）
+python javdb_magnet_cli.py top30
+
+# 過濾並導出為 TXT
+python javdb_magnet_cli.py top30 --filter 高清,中文 --export txt --output magnets.txt
+
+# 導出為 JSON
+python javdb_magnet_cli.py top30 --filter 高清,中文 --export json --output magnets.json
+
+# 導出為 CSV
+python javdb_magnet_cli.py top30 --filter 高清,中文 --export csv --output magnets.csv
+```
+
+### 2. 根據番號獲取磁力鏈接
+
+```bash
+# 僅在螢幕顯示
+python javdb_magnet_cli.py code SSIS-001 --filter 高清,中文
+
+# 導出為文件
+python javdb_magnet_cli.py code SSIS-001 --filter 高清,中文 --export txt --output SSIS-001.txt
+```
+
+### 3. 交互式模式
+
+```bash
+python javdb_magnet_cli.py interactive
+```
+
+可用命令：`top30`、`code SSIS-001`、`help`、`quit`
+
+## 🔧 程序化使用
+
+```python
+from javdb_magnet_crawler import JavDBMagnetManager
+
+manager = JavDBMagnetManager()
+results = manager.get_top30_magnets()
+
+for result in results:
+    movie = result['movie']
+    print(f"排名: {result['rank']}, 番號: {movie['code']}, 標題: {movie['title']}")
+```
+
+## ⚙️ 配置選項
+
+### 過濾標籤
+
+支持的標籤：`高清`、`中文`、`字幕`、`HD`、`Chinese`（可多選，用逗號分隔）
+
+### 導出格式
+
+- **TXT** - 文本格式，包含完整信息
+- **JSON** - 結構化數據
+- **CSV** - 表格格式
+
+**注意**：使用 `--export` 時必須配合 `--output` 指定文件名
+
+## ⚠️ 注意事項
+
+- 遵守網站使用條款和法律法規
+- 工具已內建延遲機制，避免對服務器造成負擔
+- 僅供學習和研究使用
+
+## 🔍 故障排除
+
+- **連接超時**：檢查網絡連接或使用代理
+- **解析錯誤**：網站結構可能已更改
+- **訪問被拒絕**：嘗試更換 User-Agent 或使用代理
 
 ---
 
-## 🚀 上傳步驟
-
-### 步驟 1：在 GitHub 上創建新倉庫
-
-1. 在 GitHub 上點擊 `New repository`
-2. 填寫倉庫資訊：
-   - **Repository name**: `javdb-magnet-crawler` （或您喜歡的名稱）
-   - **Description**: `JavDB 磁力鏈接專用工具`
-   - **Visibility**: 選擇 `Public` 或 `Private`
-   - **⚠️ 重要**：**不要**勾選 "Initialize this repository with a README"
-3. 點擊 `Create repository`
-
-### 步驟 2：在本地初始化 Git 倉庫
-
-打開 PowerShell 或命令提示字元，進入專案目錄：
-
-```bash
-cd "您的專案路徑"
-```
-
-例如：
-```bash
-cd "C:\Users\YourUsername\YourProject\JM"
-```
-
-初始化 Git 倉庫：
-
-```bash
-git init
-```
-
-### 步驟 3：添加檔案到 Git
-
-```bash
-# 添加所有檔案（.gitignore 會自動排除敏感檔案）
-git add .
-
-# 檢查將要提交的檔案（確認沒有敏感資訊）
-git status
-```
-
-**⚠️ 確認事項**：
-- 確認 `config.env` **沒有**在列表中（已在 .gitignore 中）
-- 確認 `javdb_top30_magnets_*.txt` 和 `magnet/` 目錄**沒有**在列表中
-
-### 步驟 4：提交檔案
-
-```bash
-git commit -m "Initial commit: JavDB magnet link crawler"
-```
-
-### 步驟 5：連接到 GitHub 遠端倉庫
-
-在 GitHub 創建倉庫後，您會看到一個網址，類似：
-```
-https://github.com/您的用戶名/javdb-magnet-crawler.git
-```
-
-添加遠端倉庫（**請替換為您的實際網址**）：
-
-```bash
-git remote add origin https://github.com/您的用戶名/javdb-magnet-crawler.git
-```
-
-### 步驟 6：上傳到 GitHub
-
-```bash
-# 設定主分支名稱
-git branch -M main
-
-# 上傳到 GitHub
-git push -u origin main
-```
-
-如果要求輸入帳號密碼：
-- **用戶名**：您的 GitHub 用戶名
-- **密碼**：需要使用 **Personal Access Token**（不是 GitHub 密碼）
-
----
-
-## 🔐 生成 Personal Access Token（如果需要）
-
-1. 前往 GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)
-2. 點擊 `Generate new token (classic)`
-3. 設定：
-   - **Note**: `My Computer`
-   - **Expiration**: 選擇過期時間
-   - **Select scopes**: 勾選 `repo`（完整權限）
-4. 點擊 `Generate token`
-5. **複製 token**（只會顯示一次，請妥善保存）
-6. 使用 token 作為密碼進行登入
-
----
-
-## ✅ 上傳後確認
-
-1. 前往您的 GitHub 倉庫頁面
-2. 確認以下檔案**有**在倉庫中：
-   - ✅ `README.md`
-   - ✅ `requirements.txt`
-   - ✅ 所有 `.py` 檔案
-   - ✅ `config.env.example`
-   - ✅ `.gitignore`
-
-3. 確認以下檔案**沒有**在倉庫中：
-   - ❌ `config.env`（含敏感配置）
-   - ❌ `javdb_top30_magnets_*.txt`（輸出檔案）
-   - ❌ `magnet/` 目錄（輸出檔案）
-
----
-
-## 📝 快速命令摘要
-
-```bash
-# 1. 初始化
-git init
-
-# 2. 添加檔案
-git add .
-
-# 3. 提交
-git commit -m "Initial commit: JavDB magnet link crawler"
-
-# 4. 添加遠端（替換為您的網址）
-git remote add origin https://github.com/您的用戶名/javdb-magnet-crawler.git
-
-# 5. 上傳
-git branch -M main
-git push -u origin main
-```
-
----
-
-## 🔄 之後的更新
-
-如果您之後修改了程式碼並想更新到 GitHub：
-
-```bash
-git add .
-git commit -m "更新說明"
-git push
-```
-
----
-
-## ❓ 常見問題
-
-### Q: 如果上傳時出現錯誤怎麼辦？
-
-A: 常見錯誤及解決方法：
-
-1. **認證失敗**
-   - 使用 Personal Access Token 而不是密碼
-
-2. **遠端倉庫已存在**
-   ```bash
-   git remote remove origin
-   git remote add origin https://github.com/您的用戶名/倉庫名.git
-   ```
-
-3. **分支衝突**
-   ```bash
-   git pull origin main --allow-unrelated-histories
-   git push -u origin main
-   ```
-
----
-
-## 🛡️ 安全檢查清單
-
-上傳前請確認：
-
-- [ ] `config.env` 不在 Git 追蹤中
-- [ ] 所有輸出檔案（`.txt`、`magnet/`）不在 Git 追蹤中
-- [ ] `__pycache__/` 目錄不在 Git 追蹤中
-- [ ] 沒有硬編碼的密碼或 API 金鑰
-
----
-
-祝您上傳順利！🎉
-
+**重要提醒**：`config.env` 等敏感配置文件不會被提交到版本控制系統。
