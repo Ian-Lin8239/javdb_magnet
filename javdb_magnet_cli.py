@@ -194,6 +194,32 @@ class JavDBMagnetCLI:
         # 顯示結果
         self._display_magnet_links(magnet_links, args.movie_code)
         
+        # 詢問是否保存磁力鏈接到文件（只在未指定 --export 時詢問）
+        export_value = getattr(args, 'export', None)
+        if export_value is None or export_value == '':
+            try:
+                save_choice = Prompt.ask(
+                    "\n[yellow]是否需要將鏈接下載到文件？[/yellow]\n"
+                    "[cyan]輸入項目序號（用逗號分隔，例如: 1,3,4），或直接按 Enter 保存全部:[/cyan]",
+                    default=""
+                )
+                
+                if save_choice.strip():
+                    # 解析用戶輸入的序號
+                    try:
+                        indices = [int(i.strip()) for i in save_choice.split(',') if i.strip().isdigit()]
+                        if indices:
+                            self._save_magnet_links_to_file(magnet_links, indices)
+                        else:
+                            self.console.print("[yellow]未輸入有效的序號，跳過保存[/yellow]")
+                    except ValueError:
+                        self.console.print("[yellow]輸入格式錯誤，跳過保存[/yellow]")
+                else:
+                    # 直接按 Enter，保存全部
+                    self._save_magnet_links_to_file(magnet_links)
+            except KeyboardInterrupt:
+                self.console.print("\n[yellow]已取消保存[/yellow]")
+        
         # 導出（只在明確指定時才導出）
         if args.export:
             if not args.output:
@@ -271,34 +297,105 @@ class JavDBMagnetCLI:
             return
         
         table = Table(title=f"番號 {movie_code} 的磁力鏈接 - 共 {len(magnet_links)} 個")
+        table.add_column("序號", style="white", width=6)  # 新增序號列
         table.add_column("標題", style="cyan", max_width=30)
         table.add_column("大小", style="green", width=12)
         table.add_column("標籤", style="yellow", width=15)
         table.add_column("文件數", style="magenta", width=8)
         table.add_column("日期", style="blue", width=12)
-        table.add_column("下載鏈接", style="red", max_width=50)
+        table.add_column("下載鏈接", style="red")  # 移除 max_width 限制，顯示完整鏈接
         
-        for magnet in magnet_links:
+        for index, magnet in enumerate(magnet_links, 1):  # 使用 enumerate 從 1 開始
             # 處理標題長度
-            display_title = magnet.title
+            display_title = magnet.title or ""
             if len(display_title) > 27:
                 display_title = display_title[:27] + "..."
             
-            # 處理下載鏈接長度
-            download_link = magnet.copy_url or magnet.magnet_url
-            if len(download_link) > 47:
-                download_link = download_link[:47] + "..."
+            # 下載鏈接不需要截斷，顯示完整鏈接
+            download_link = magnet.copy_url or magnet.magnet_url or ""
             
             table.add_row(
+                str(index),  # 添加序號
                 display_title,
-                magnet.size,
-                ", ".join(magnet.tags),
-                str(magnet.file_count),
-                magnet.date,
+                magnet.size or "",
+                ", ".join(magnet.tags) if magnet.tags else "",
+                str(magnet.file_count) if magnet.file_count > 0 else "",
+                magnet.date or "",
                 download_link
             )
         
         self.console.print(table)
+    
+    def _save_magnet_links_to_file(self, magnet_links: List[MagnetLink], selected_indices: List[int] = None):
+        """保存磁力鏈接到 magnet/Url List.txt
+        
+        Args:
+            magnet_links: 磁力鏈接列表
+            selected_indices: 選中的索引列表（從1開始），如果為None則保存全部
+        """
+        import os
+        from datetime import datetime
+        
+        # 確保 magnet 目錄存在
+        os.makedirs("magnet", exist_ok=True)
+        filename = "magnet/Url List.txt"
+        
+        # 選擇要保存的磁力鏈接
+        if selected_indices:
+            # 轉換為0-based索引並過濾
+            selected_links = [
+                magnet_links[i - 1] 
+                for i in selected_indices 
+                if 1 <= i <= len(magnet_links)
+            ]
+        else:
+            selected_links = magnet_links
+        
+        if not selected_links:
+            self.console.print("[yellow]沒有可保存的磁力鏈接[/yellow]")
+            return
+        
+        # 讀取現有URL（用於去重）
+        existing_urls = set()
+        if os.path.exists(filename):
+            try:
+                with open(filename, 'r', encoding='utf-8') as f:
+                    existing_urls = {line.strip() for line in f if line.strip() and not line.strip().startswith('20')}
+            except Exception:
+                pass
+        
+        # 追加寫入
+        saved_count = 0
+        with open(filename, 'a', encoding='utf-8') as f:
+            # 檢查是否需要添加日期標題
+            current_date = datetime.now().strftime('%Y/%m/%d')
+            needs_date_header = True
+            if os.path.exists(filename) and os.path.getsize(filename) > 0:
+                try:
+                    with open(filename, 'r', encoding='utf-8') as check_file:
+                        lines = check_file.readlines()
+                        if lines:
+                            for line in reversed(lines):
+                                last_line = line.strip()
+                                if last_line:
+                                    if last_line == current_date:
+                                        needs_date_header = False
+                                    break
+                except Exception:
+                    pass
+            
+            if needs_date_header:
+                f.write(f"\n{current_date}\n")
+            
+            # 寫入選中的磁力鏈接
+            for magnet in selected_links:
+                url = (magnet.copy_url or magnet.magnet_url or "").strip()
+                if url and url not in existing_urls:
+                    f.write(f"{url}\n")
+                    existing_urls.add(url)
+                    saved_count += 1
+        
+        self.console.print(f"[green]已保存 {saved_count} 個磁力鏈接到 {filename}[/green]")
     
     def _display_stats(self, stats: Dict[str, Any]):
         """顯示統計信息"""
@@ -582,7 +679,7 @@ class JavDBMagnetCLI:
         args = argparse.Namespace()
         args.movie_code = movie_code
         args.filter = None
-        args.export = 'txt'
+        args.export = None  # 設置為 None，讓 handle_code 詢問是否保存
         args.output = None
         
         self.handle_code(args)

@@ -338,6 +338,139 @@ class JavDBMagnetCrawler:
         
         return movie
     
+    def search_movie_by_code(self, movie_code: str) -> Optional[str]:
+        """通過番號搜索找到正確的影片 URL
+        
+        Returns:
+            找到的影片詳情頁 URL，如果未找到則返回 None
+        """
+        # #region agent log
+        import json
+        with open(r'c:\Users\Ian\OneDrive - ASUS\Cursor\JM\.cursor\debug.log', 'a', encoding='utf-8') as log_file:
+            log_file.write(json.dumps({
+                "sessionId": "debug-session",
+                "runId": "search-investigation",
+                "hypothesisId": "A",
+                "location": "javdb_magnet_crawler.py:search_movie_by_code:entry",
+                "message": "Searching movie by code",
+                "data": {"movie_code": movie_code},
+                "timestamp": int(time.time() * 1000)
+            }, ensure_ascii=False) + "\n")
+        # #endregion agent log
+        
+        search_url = f"{self.base_url}/search"
+        params = {"q": movie_code}
+        
+        # #region agent log
+        with open(r'c:\Users\Ian\OneDrive - ASUS\Cursor\JM\.cursor\debug.log', 'a', encoding='utf-8') as log_file:
+            log_file.write(json.dumps({
+                "sessionId": "debug-session",
+                "runId": "search-investigation",
+                "hypothesisId": "A",
+                "location": "javdb_magnet_crawler.py:search_movie_by_code:before_request",
+                "message": "Requesting search page",
+                "data": {"search_url": search_url, "params": params},
+                "timestamp": int(time.time() * 1000)
+            }, ensure_ascii=False) + "\n")
+        # #endregion agent log
+        
+        response = self._make_request(search_url, params)
+        if not response:
+            self.logger.error(f"無法獲取搜索頁面: {search_url}")
+            return None
+        
+        # #region agent log
+        with open(r'c:\Users\Ian\OneDrive - ASUS\Cursor\JM\.cursor\debug.log', 'a', encoding='utf-8') as log_file:
+            log_file.write(json.dumps({
+                "sessionId": "debug-session",
+                "runId": "search-investigation",
+                "hypothesisId": "B",
+                "location": "javdb_magnet_crawler.py:search_movie_by_code:after_request",
+                "message": "Received search response",
+                "data": {"response_length": len(response.text), "status_code": response.status_code},
+                "timestamp": int(time.time() * 1000)
+            }, ensure_ascii=False) + "\n")
+        # #endregion agent log
+        
+        # 解析搜索結果，找到第一個匹配的影片
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # 嘗試多種選擇器來找到影片項目（與排行榜類似）
+        movie_items = soup.find_all('div', class_='item')
+        if not movie_items:
+            movie_items = soup.find_all('div', class_='movie-item')
+        if not movie_items:
+            movie_items = soup.find_all('div', class_='video-item')
+        
+        # #region agent log
+        with open(r'c:\Users\Ian\OneDrive - ASUS\Cursor\JM\.cursor\debug.log', 'a', encoding='utf-8') as log_file:
+            log_file.write(json.dumps({
+                "sessionId": "debug-session",
+                "runId": "search-investigation",
+                "hypothesisId": "C",
+                "location": "javdb_magnet_crawler.py:search_movie_by_code:after_parse",
+                "message": "Parsed search results",
+                "data": {"movie_items_count": len(movie_items)},
+                "timestamp": int(time.time() * 1000)
+            }, ensure_ascii=False) + "\n")
+        # #endregion agent log
+        
+        # 遍歷搜索結果，找到包含目標番號的影片
+        for item in movie_items:
+            link_elem = item.find('a')
+            if not link_elem:
+                continue
+            
+            detail_url = urljoin(self.base_url, link_elem.get('href', ''))
+            
+            # 嘗試解析影片項目獲取番號（如果可用）
+            movie_data = self._parse_movie_item(item, 0)
+            if movie_data:
+                # 檢查標題或代碼是否包含目標番號
+                code_in_title = movie_code.upper() in (movie_data.get('code', '') or '').upper()
+                code_in_title_text = movie_code.upper() in (movie_data.get('title', '') or '').upper()
+                
+                # #region agent log
+                with open(r'c:\Users\Ian\OneDrive - ASUS\Cursor\JM\.cursor\debug.log', 'a', encoding='utf-8') as log_file:
+                    log_file.write(json.dumps({
+                        "sessionId": "debug-session",
+                        "runId": "search-investigation",
+                        "hypothesisId": "C",
+                        "location": "javdb_magnet_crawler.py:search_movie_by_code:checking_item",
+                        "message": "Checking search result item",
+                        "data": {
+                            "target_code": movie_code,
+                            "item_code": movie_data.get('code', ''),
+                            "item_title": movie_data.get('title', '')[:50],
+                            "detail_url": detail_url,
+                            "code_in_title": code_in_title,
+                            "code_in_title_text": code_in_title_text
+                        },
+                        "timestamp": int(time.time() * 1000)
+                    }, ensure_ascii=False) + "\n")
+                # #endregion agent log
+                
+                # 如果找到匹配的番號，返回該影片的 URL
+                if code_in_title or code_in_title_text:
+                    self.logger.info(f"通過搜索找到影片: {detail_url} (番號: {movie_data.get('code', '')})")
+                    return detail_url
+            else:
+                # 如果無法解析，至少返回第一個結果的 URL（通常搜索結果的第一個最相關）
+                if item == movie_items[0]:
+                    self.logger.info(f"返回搜索結果第一個影片: {detail_url}")
+                    return detail_url
+        
+        # 如果沒有找到匹配項，但搜索結果存在，返回第一個結果
+        if movie_items:
+            link_elem = movie_items[0].find('a')
+            if link_elem:
+                detail_url = urljoin(self.base_url, link_elem.get('href', ''))
+                self.logger.warning(f"未找到精確匹配，返回搜索結果第一個影片: {detail_url}")
+                return detail_url
+        
+        self.logger.warning(f"未找到番號 {movie_code} 的影片")
+        return None
+    
     def get_movie_magnet_links(self, movie_url: str) -> List[MagnetLink]:
         """獲取影片的磁力鏈接"""
         self.logger.info(f"獲取磁力鏈接: {movie_url}")
@@ -468,43 +601,25 @@ class JavDBMagnetCrawler:
         """解析磁力鏈接項目"""
         magnet = MagnetLink()
         
-        # 獲取標題（通常是番號）
-        title_elem = item.find('span', class_='title') or item.find('td', class_='title') or item.find('strong')
-        if title_elem:
-            magnet.title = clean_text(title_elem.get_text())
+        # #region agent log - 記錄 HTML 結構
+        import json
+        item_html = str(item)[:500]  # 只記錄前500個字符
+        with open(r'c:\Users\Ian\OneDrive - ASUS\Cursor\JM\.cursor\debug.log', 'a', encoding='utf-8') as log_file:
+            log_file.write(json.dumps({
+                "sessionId": "debug-session",
+                "runId": "parse-magnet-item",
+                "hypothesisId": "A",
+                "location": "javdb_magnet_crawler.py:_parse_magnet_item:entry",
+                "message": "Parsing magnet item HTML structure",
+                "data": {"item_html": item_html},
+                "timestamp": int(time.time() * 1000)
+            }, ensure_ascii=False) + "\n")
+        # #endregion agent log
         
-        # 獲取大小和文件數量
-        size_elem = item.find('span', class_='size') or item.find('td', class_='size')
-        if size_elem:
-            size_text = clean_text(size_elem.get_text())
-            magnet.size = size_text
-            
-            # 解析文件數量
-            file_count_match = re.search(r'(\d+)個文件', size_text)
-            if file_count_match:
-                magnet.file_count = int(file_count_match.group(1))
-        
-        # 獲取標籤（高清、字幕等）
-        tag_elem = item.find('span', class_='tag') or item.find('span', class_='label') or item.find('span', class_='badge')
-        if tag_elem:
-            tag_text = clean_text(tag_elem.get_text())
-            if tag_text in ['高清', '字幕', 'HD', 'Subtitle', '4K', '1080p', '720p']:
-                magnet.tags.append(tag_text)
-        
-        # 獲取複製按鈕的鏈接 - 這是重點！
-        copy_button = item.find('a', class_='copy-btn') or item.find('button', class_='copy') or item.find('a', string='複製')
+        # 獲取複製按鈕的鏈接 - 這是重點！優先獲取
+        copy_button = item.find('a', class_='copy-btn') or item.find('button', class_='copy') or item.find('a', string='複製') or item.find('a', class_='copy')
         if copy_button:
-            magnet.copy_url = copy_button.get('href', '') or copy_button.get('data-url', '') or copy_button.get('data-clipboard-text', '')
-        
-        # 獲取下載按鈕的鏈接
-        download_button = item.find('a', class_='download-btn') or item.find('button', class_='download') or item.find('a', string='下載')
-        if download_button:
-            magnet.download_url = download_button.get('href', '') or download_button.get('data-url', '')
-        
-        # 獲取日期
-        date_elem = item.find('span', class_='date') or item.find('td', class_='date')
-        if date_elem:
-            magnet.date = clean_text(date_elem.get_text())
+            magnet.copy_url = copy_button.get('href', '') or copy_button.get('data-url', '') or copy_button.get('data-clipboard-text', '') or copy_button.get('data-clipboard', '')
         
         # 如果沒有找到複製按鈕，嘗試從其他元素獲取磁力鏈接
         if not magnet.copy_url:
@@ -514,8 +629,158 @@ class JavDBMagnetCrawler:
                 magnet.magnet_url = magnet_link_elem.get('href', '')
                 magnet.copy_url = magnet.magnet_url
         
+        # 如果還是沒有找到，嘗試從文本內容中提取磁力鏈接
+        if not magnet.copy_url:
+            item_text = item.get_text()
+            # 改進正則表達式以匹配完整的磁力鏈接（包括所有參數）
+            magnet_match = re.search(r'magnet:\?xt=urn:btih:[a-zA-Z0-9]+[^"\s<>]*', item_text)
+            if magnet_match:
+                magnet.copy_url = magnet_match.group(0)
+                magnet.magnet_url = magnet.copy_url
+        
+        # 從磁力鏈接中提取標題（從 dn 參數）- 優先提取標題
+        if magnet.copy_url:
+            # 使用更寬鬆的正則表達式來匹配 dn 參數（可能包含 URL 編碼的特殊字符）
+            dn_match = re.search(r'dn=([^&]+)', magnet.copy_url, re.IGNORECASE)
+            if not dn_match:
+                # 如果第一個正則沒匹配到，嘗試匹配包含更多字符的版本
+                dn_match = re.search(r'dn=([^&"\s<>]+)', magnet.copy_url, re.IGNORECASE)
+            if dn_match:
+                dn_value = dn_match.group(1)
+                # URL 解碼
+                from urllib.parse import unquote
+                try:
+                    decoded_dn = unquote(dn_value)
+                    # #region agent log
+                    with open(r'c:\Users\Ian\OneDrive - ASUS\Cursor\JM\.cursor\debug.log', 'a', encoding='utf-8') as log_file:
+                        log_file.write(json.dumps({
+                            "sessionId": "debug-session",
+                            "runId": "parse-magnet-item",
+                            "hypothesisId": "B",
+                            "location": "javdb_magnet_crawler.py:_parse_magnet_item:extract_dn",
+                            "message": "Extracting title from dn parameter",
+                            "data": {"dn_value": dn_value, "decoded_dn": decoded_dn, "copy_url": magnet.copy_url[:100]},
+                            "timestamp": int(time.time() * 1000)
+                        }, ensure_ascii=False) + "\n")
+                    # #endregion agent log
+                    # 提取番號（例如：[javdb.com]JUR-496-C.torrent -> JUR-496-C）
+                    code_match = re.search(r'\[javdb\.com\]([A-Z0-9\-]+)', decoded_dn, re.IGNORECASE)
+                    if code_match:
+                        magnet.title = code_match.group(1)
+                    else:
+                        # 如果沒有 [javdb.com] 前綴，直接使用解碼後的值（去掉 .torrent 等後綴）
+                        magnet.title = decoded_dn.replace('.torrent', '').replace('.mkv', '').replace('.mp4', '')
+                except Exception as e:
+                    # #region agent log
+                    with open(r'c:\Users\Ian\OneDrive - ASUS\Cursor\JM\.cursor\debug.log', 'a', encoding='utf-8') as log_file:
+                        log_file.write(json.dumps({
+                            "sessionId": "debug-session",
+                            "runId": "parse-magnet-item",
+                            "hypothesisId": "B",
+                            "location": "javdb_magnet_crawler.py:_parse_magnet_item:extract_dn_error",
+                            "message": "Error extracting dn",
+                            "data": {"dn_value": dn_value, "error": str(e)},
+                            "timestamp": int(time.time() * 1000)
+                        }, ensure_ascii=False) + "\n")
+                    # #endregion agent log
+                    magnet.title = dn_value.replace('.torrent', '').replace('.mkv', '').replace('.mp4', '')
+        
+        # 獲取標題（通常是番號）- 嘗試多種選擇器
+        if not magnet.title:
+            title_elem = (item.find('span', class_='title') or 
+                         item.find('td', class_='title') or 
+                         item.find('strong') or
+                         item.find('div', class_='title') or
+                         item.find('p', class_='title') or
+                         item.find('a', class_='title'))
+            if title_elem:
+                magnet.title = clean_text(title_elem.get_text())
+        
+        # 獲取大小和文件數量 - 嘗試多種選擇器
+        size_elem = (item.find('span', class_='size') or 
+                    item.find('td', class_='size') or
+                    item.find('div', class_='size') or
+                    item.find('span', class_='file-size') or
+                    item.find('td', string=re.compile(r'\d+\.?\d*\s*(GB|MB|KB|TB)', re.IGNORECASE)))
+        if size_elem:
+            size_text = clean_text(size_elem.get_text())
+            magnet.size = size_text
+            
+            # 解析文件數量
+            file_count_match = re.search(r'(\d+)個文件', size_text)
+            if file_count_match:
+                magnet.file_count = int(file_count_match.group(1))
+        
+        # 如果大小仍然為空，嘗試從文本中提取
+        if not magnet.size:
+            item_text = item.get_text()
+            size_match = re.search(r'(\d+\.?\d*)\s*(GB|MB|KB|TB)', item_text, re.IGNORECASE)
+            if size_match:
+                magnet.size = f"{size_match.group(1)} {size_match.group(2).upper()}"
+        
+        # 獲取標籤（高清、字幕等）- 嘗試多種選擇器
+        tag_elems = (item.find_all('span', class_='tag') or 
+                    item.find_all('span', class_='label') or 
+                    item.find_all('span', class_='badge') or
+                    item.find_all('div', class_='tag') or
+                    item.find_all('a', class_='tag'))
+        for tag_elem in tag_elems:
+            tag_text = clean_text(tag_elem.get_text())
+            if tag_text in ['高清', '字幕', 'HD', 'Subtitle', '4K', '1080p', '720p', '中文', 'Chinese']:
+                if tag_text not in magnet.tags:
+                    magnet.tags.append(tag_text)
+        
+        # 如果沒有找到標籤元素，嘗試從文本中識別
+        if not magnet.tags:
+            item_text = item.get_text()
+            if any(keyword in item_text for keyword in ['高清', 'HD', '4K', '1080p', '720p']):
+                magnet.tags.append('高清')
+            if any(keyword in item_text for keyword in ['字幕', 'Subtitle', '中文', 'Chinese']):
+                magnet.tags.append('字幕')
+        
+        # 獲取下載按鈕的鏈接
+        download_button = item.find('a', class_='download-btn') or item.find('button', class_='download') or item.find('a', string='下載')
+        if download_button:
+            magnet.download_url = download_button.get('href', '') or download_button.get('data-url', '')
+        
+        # 獲取日期 - 嘗試多種選擇器
+        date_elem = (item.find('span', class_='date') or 
+                    item.find('td', class_='date') or
+                    item.find('div', class_='date') or
+                    item.find('time') or
+                    item.find('span', class_='time'))
+        if date_elem:
+            magnet.date = clean_text(date_elem.get_text())
+        
+        # 解析文件數量（如果還沒解析到）
+        if magnet.file_count == 0:
+            item_text = item.get_text()
+            file_count_match = re.search(r'(\d+)個文件', item_text)
+            if file_count_match:
+                magnet.file_count = int(file_count_match.group(1))
+        
         # 調試信息
         self.logger.info(f"解析磁力鏈接項目: 標題={magnet.title}, 大小={magnet.size}, 標籤={magnet.tags}, 複製鏈接={magnet.copy_url}")
+        
+        # #region agent log - 記錄最終解析結果
+        with open(r'c:\Users\Ian\OneDrive - ASUS\Cursor\JM\.cursor\debug.log', 'a', encoding='utf-8') as log_file:
+            log_file.write(json.dumps({
+                "sessionId": "debug-session",
+                "runId": "parse-magnet-item",
+                "hypothesisId": "C",
+                "location": "javdb_magnet_crawler.py:_parse_magnet_item:final_result",
+                "message": "Final parsed magnet item result",
+                "data": {
+                    "title": magnet.title,
+                    "size": magnet.size,
+                    "tags": magnet.tags,
+                    "file_count": magnet.file_count,
+                    "date": magnet.date,
+                    "copy_url": magnet.copy_url[:100] if magnet.copy_url else None
+                },
+                "timestamp": int(time.time() * 1000)
+            }, ensure_ascii=False) + "\n")
+        # #endregion agent log
         
         return magnet if magnet.copy_url or magnet.magnet_url else None
     
@@ -790,7 +1055,53 @@ class JavDBMagnetManager:
     
     def get_magnets_by_code(self, movie_code: str) -> List[MagnetLink]:
         """根據番號獲取磁力鏈接"""
-        movie_url = f"{self.crawler.base_url}/v/{movie_code}"
+        # #region agent log
+        import json
+        import time
+        with open(r'c:\Users\Ian\OneDrive - ASUS\Cursor\JM\.cursor\debug.log', 'a', encoding='utf-8') as log_file:
+            log_file.write(json.dumps({
+                "sessionId": "debug-session",
+                "runId": "get-magnets-fix",
+                "hypothesisId": "ALL",
+                "location": "javdb_magnet_crawler.py:get_magnets_by_code:entry",
+                "message": "Getting magnets by code - using search",
+                "data": {"movie_code": movie_code},
+                "timestamp": int(time.time() * 1000)
+            }, ensure_ascii=False) + "\n")
+        # #endregion agent log
+        
+        # 先通過搜索找到正確的影片 URL（包含正確的 ID）
+        movie_url = self.crawler.search_movie_by_code(movie_code)
+        
+        if not movie_url:
+            self.logger.error(f"無法找到番號 {movie_code} 的影片")
+            # #region agent log
+            with open(r'c:\Users\Ian\OneDrive - ASUS\Cursor\JM\.cursor\debug.log', 'a', encoding='utf-8') as log_file:
+                log_file.write(json.dumps({
+                    "sessionId": "debug-session",
+                    "runId": "get-magnets-fix",
+                    "hypothesisId": "ALL",
+                    "location": "javdb_magnet_crawler.py:get_magnets_by_code:not_found",
+                    "message": "Movie not found in search",
+                    "data": {"movie_code": movie_code},
+                    "timestamp": int(time.time() * 1000)
+                }, ensure_ascii=False) + "\n")
+            # #endregion agent log
+            return []
+        
+        # #region agent log
+        with open(r'c:\Users\Ian\OneDrive - ASUS\Cursor\JM\.cursor\debug.log', 'a', encoding='utf-8') as log_file:
+            log_file.write(json.dumps({
+                "sessionId": "debug-session",
+                "runId": "get-magnets-fix",
+                "hypothesisId": "ALL",
+                "location": "javdb_magnet_crawler.py:get_magnets_by_code:found_url",
+                "message": "Found correct movie URL",
+                "data": {"movie_code": movie_code, "movie_url": movie_url},
+                "timestamp": int(time.time() * 1000)
+            }, ensure_ascii=False) + "\n")
+        # #endregion agent log
+        
         return self.crawler.get_movie_magnet_links(movie_url)
     
     def export_magnets_to_file(self, results: List[Dict[str, Any]], 
