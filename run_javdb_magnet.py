@@ -5,7 +5,6 @@ JavDB 磁力鏈接工具快速啟動腳本
 import sys
 import os
 import subprocess
-from pathlib import Path
 
 # 強制無緩衝輸出
 sys.stdout.reconfigure(encoding='utf-8') if hasattr(sys.stdout, 'reconfigure') else None

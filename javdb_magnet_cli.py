@@ -303,7 +303,10 @@ class JavDBMagnetCLI:
         table.add_column("標籤", style="yellow", width=15)
         table.add_column("文件數", style="magenta", width=8)
         table.add_column("日期", style="blue", width=12)
-        table.add_column("下載鏈接", style="red")  # 移除 max_width 限制，顯示完整鏈接
+        # 復原：先使用無限制顯示，然後測試不同的 overflow 選項
+        # 一行不限制長度：移除 max_width 和 overflow，讓欄位自動擴展佔用剩餘空間
+        # 其他欄位都有固定寬度，下載鏈接欄位會自動佔用剩餘空間
+        table.add_column("下載鏈接", style="red")
         
         for index, magnet in enumerate(magnet_links, 1):  # 使用 enumerate 從 1 開始
             # 處理標題長度
@@ -311,7 +314,7 @@ class JavDBMagnetCLI:
             if len(display_title) > 27:
                 display_title = display_title[:27] + "..."
             
-            # 下載鏈接不需要截斷，顯示完整鏈接
+            # 下載鏈接不需要截斷，顯示完整鏈接（會自動換行）
             download_link = magnet.copy_url or magnet.magnet_url or ""
             
             table.add_row(
@@ -327,7 +330,7 @@ class JavDBMagnetCLI:
         self.console.print(table)
     
     def _save_magnet_links_to_file(self, magnet_links: List[MagnetLink], selected_indices: List[int] = None):
-        """保存磁力鏈接到 magnet/Url List.txt
+        """保存磁力鏈接到 magnet/url_list_code.txt（番號查詢專用）
         
         Args:
             magnet_links: 磁力鏈接列表
@@ -338,7 +341,7 @@ class JavDBMagnetCLI:
         
         # 確保 magnet 目錄存在
         os.makedirs("magnet", exist_ok=True)
-        filename = "magnet/Url List.txt"
+        filename = "magnet/url_list_code.txt"
         
         # 選擇要保存的磁力鏈接
         if selected_indices:

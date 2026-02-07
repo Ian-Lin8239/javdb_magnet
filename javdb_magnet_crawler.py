@@ -2,15 +2,44 @@
 JavDB 磁力鏈接專用爬蟲
 專門用於獲取有碼月榜前30的磁力鏈接下載位置
 """
-import requests
 import time
 import random
 import re
 import os
 from typing import List, Optional, Dict, Any
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlencode
 from datetime import datetime
+
+# 使用 curl_cffi 模擬 Chrome TLS 指紋以通過 Cloudflare（requests 會被 403）
+try:
+    from curl_cffi import requests as cffi_requests
+    _USE_CFFI = True
+except ImportError:
+    import requests as cffi_requests
+    _USE_CFFI = False
+import requests  # 仍用於 RequestException 等
+
+# 403 時改用 Playwright 真實瀏覽器取得頁面（需 pip install playwright && playwright install chromium）
+try:
+    from playwright.sync_api import sync_playwright
+    _USE_PLAYWRIGHT = True
+except ImportError:
+    _USE_PLAYWRIGHT = False
+
+
+class _FakeResponse:
+    """供解析用的簡易 response，僅含 .text / .status_code / .url"""
+    __slots__ = ("text", "status_code", "url")
+    def __init__(self, text: str, status_code: int = 200, url: str = ""):
+        self.text = text
+        self.status_code = status_code
+        self.url = url
+
+# 固定桌面 Chrome UA，避免 Cloudflare 因隨機/行動 UA 回傳 403
+FIXED_CHROME_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+# 年齡驗證：點「是,我已滿18歲」時瀏覽器會請求此 URL，伺服器 302 並設定 cookie
+OVER18_URL = "/over18?respond=1"
 from utils import (
     get_random_user_agent, random_delay, clean_text, setup_logging
 )
@@ -34,18 +63,30 @@ class JavDBMagnetCrawler:
     
     def __init__(self):
         self.base_url = "https://javdb.com"
-        self.session = requests.Session()
+        if _USE_CFFI:
+            self.session = cffi_requests.Session(impersonate="chrome")
+        else:
+            self.session = requests.Session()
         self.logger = setup_logging()
         self._setup_session()
+        if _USE_CFFI:
+            self.logger.info("使用 curl_cffi 模擬 Chrome TLS（impersonate=chrome）")
+        else:
+            self.logger.warning("未安裝 curl_cffi，使用 requests，可能遭遇 403，請執行: pip install curl_cffi")
+        if _USE_PLAYWRIGHT:
+            self.logger.info("Playwright 備援已啟用（403 時將用真實瀏覽器取得頁面）")
+        else:
+            self.logger.info("若持續 403，可安裝 Playwright 備援: pip install playwright 後執行 playwright install chromium")
     
     def _setup_session(self):
         """設置會話"""
         self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,ja;q=0.7",
+            "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
             "Accept-Encoding": "gzip, deflate, br",
             "Connection": "keep-alive",
+            "Referer": "https://javdb.com/",
             "Upgrade-Insecure-Requests": "1",
             "Sec-Fetch-Dest": "document",
             "Sec-Fetch-Mode": "navigate",
@@ -54,38 +95,84 @@ class JavDBMagnetCrawler:
             "DNT": "1",
             "Sec-GPC": "1"
         })
+        # JavDB 18 歲確認：直接帶入 over18=1，無需先請求 over18 頁面
+        self.session.cookies.set("over18", "1", domain="javdb.com", path="/")
+    
+    def _fetch_with_playwright(self, full_url: str) -> Optional[_FakeResponse]:
+        """403 時用真實瀏覽器取得頁面。需安裝 playwright 並執行 playwright install chromium。"""
+        if not _USE_PLAYWRIGHT:
+            return None
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                context = browser.new_context(
+                    locale="zh-TW",
+                    viewport={"width": 1280, "height": 720},
+                )
+                context.add_cookies([{"name": "over18", "value": "1", "domain": "javdb.com", "path": "/"}])
+                page = context.new_page()
+                page.goto(full_url, wait_until="domcontentloaded", timeout=30000)
+                # 若有年齡驗證彈窗，點「是,我已滿18歲」
+                try:
+                    btn = page.get_by_role("button", name="是")
+                    if btn.is_visible(timeout=2000):
+                        btn.click()
+                        page.wait_for_load_state("networkidle", timeout=10000)
+                except Exception:
+                    pass
+                html = page.content()
+                browser.close()
+                return _FakeResponse(html, 200, full_url)
+        except Exception as e:
+            self.logger.warning(f"Playwright 備援失敗: {e}")
+            return None
     
     def _make_request(self, url: str, params: Optional[Dict] = None, 
-                     retries: int = 3) -> Optional[requests.Response]:
-        """發送HTTP請求"""
+                     retries: int = 3, skip_ua_rotation: bool = False,
+                     extra_headers: Optional[Dict[str, str]] = None) -> Optional[Any]:
+        """發送HTTP請求。skip_ua_rotation=True 時不更換 UA（用於先訪首頁再請求排行榜以通過 Cloudflare）。"""
         for attempt in range(retries + 1):
             try:
                 # 隨機延遲
                 if attempt > 0:
                     random_delay(2, 5)
                 
-                # 更新User-Agent
-                self.session.headers['User-Agent'] = get_random_user_agent()
-                
+                # 更新User-Agent（若未要求固定 UA）
+                if not skip_ua_rotation:
+                    self.session.headers['User-Agent'] = get_random_user_agent()
+                req_headers = {'Accept-Encoding': 'gzip, deflate'}
+                if extra_headers:
+                    req_headers.update(extra_headers)
+                # 每次請求都明確帶上 over18，確保 curl_cffi 的 cookie jar 有送出
+                req_cookies = {"over18": "1"}
                 response = self.session.get(
-                    url, 
-                    params=params, 
+                    url,
+                    params=params,
                     timeout=30,
                     allow_redirects=True,
-                    headers={'Accept-Encoding': 'gzip, deflate'}
+                    headers=req_headers,
+                    cookies=req_cookies
                 )
                 
                 response.raise_for_status()
-                
                 # 請求間隔 - 增加延遲以降低被封鎖的風險
                 random_delay(2, 4)  # 從 1-3秒 增加到 2-4秒
                 
                 return response
                 
-            except requests.RequestException as e:
+            except Exception as e:
                 self.logger.warning(f"請求失敗 (嘗試 {attempt + 1}/{retries + 1}): {e}")
                 
                 if attempt == retries:
+                    # 若為 403 且已安裝 Playwright，改用真實瀏覽器取得頁面
+                    err_resp = getattr(e, "response", None)
+                    if err_resp is not None and err_resp.status_code == 403 and _USE_PLAYWRIGHT:
+                        full_url = url + ("?" + urlencode(params)) if params else url
+                        self.logger.info("收到 403，嘗試使用 Playwright 真實瀏覽器取得頁面...")
+                        pw_resp = self._fetch_with_playwright(full_url)
+                        if pw_resp is not None:
+                            self.logger.info("Playwright 取得頁面成功")
+                            return pw_resp
                     self.logger.error(f"請求最終失敗: {url}")
                     return None
                 
@@ -98,6 +185,8 @@ class JavDBMagnetCrawler:
         """獲取有碼月榜前30的影片及其磁力鏈接"""
         self.logger.info(f"開始獲取有碼月榜前{limit}的影片磁力鏈接")
         
+        # 直接請求排行榜（已帶 over18=1 cookie 與 Chrome TLS），不再先訪首頁避免觸發 403
+        self.session.headers['User-Agent'] = FIXED_CHROME_UA
         # 1. 獲取排行榜頁面
         rankings_url = f"{self.base_url}/rankings/movies"
         params = {
@@ -105,8 +194,11 @@ class JavDBMagnetCrawler:
             "t": "censored",  # 有碼
             "page": 1
         }
-        
-        response = self._make_request(rankings_url, params)
+        response = self._make_request(
+            rankings_url, params,
+            skip_ua_rotation=True,
+            extra_headers={"Referer": self.base_url + "/"}
+        )
         if not response:
             self.logger.error("無法獲取排行榜頁面")
             return []
@@ -413,15 +505,8 @@ class JavDBMagnetCrawler:
         """解析磁力鏈接頁面"""
         soup = BeautifulSoup(html_content, 'html.parser')
         magnet_links = []
-        
-        # 檢查頁面是否包含錯誤信息（如需要登錄、驗證碼等）
         error_indicators = ['驗證碼', '登錄', '請登入', '需要登錄', 'captcha', 'login', '請稍後再試', '訪問過於頻繁']
         page_text_lower = html_content.lower()
-        for indicator in error_indicators:
-            if indicator.lower() in page_text_lower:
-                self.logger.warning(f"頁面可能包含錯誤提示（{indicator}），網站可能限制了訪問")
-                # 即使檢測到錯誤，也嘗試繼續提取
-        
         
         # 查找磁力鏈接區域 - 嘗試多種選擇器
         magnet_section = None
@@ -479,6 +564,10 @@ class JavDBMagnetCrawler:
             
             if not magnet_links:
                 self.logger.warning("無法從頁面中提取任何磁力鏈接")
+                for ind in error_indicators:
+                    if ind.lower() in page_text_lower:
+                        self.logger.warning(f"頁面可能包含錯誤提示（{ind}），網站可能限制了訪問")
+                        break
                 return []
             return magnet_links
         
@@ -522,6 +611,11 @@ class JavDBMagnetCrawler:
                 continue
         
         self.logger.info(f"總共解析出 {len(magnet_links)} 個磁力鏈接")
+        if not magnet_links:
+            for ind in error_indicators:
+                if ind.lower() in page_text_lower:
+                    self.logger.warning(f"頁面可能包含錯誤提示（{ind}），網站可能限制了訪問")
+                    break
         return magnet_links
     
     def _parse_magnet_item(self, item) -> Optional[MagnetLink]:
@@ -748,12 +842,14 @@ class JavDBMagnetManager:
             self.logger.info(f"📊 已記錄 {stats['total_scraped']} 部影片，將自動跳過重複")
         else:
             # 如果 scraped_movies.json 不存在或為空，清空 written_urls 以確保一致性
-            # 這樣可以避免因為舊的 Url List.txt 導致誤判重複
+            # 這樣可以避免因為舊的 url_list_monthly.txt 導致誤判重複
             self.written_urls.clear()
             self.logger.info("📋 檢測到無歷史記錄，已清空URL重複檢查列表")
         
         self.logger.info(f"開始獲取有碼月榜前{limit}的影片磁力鏈接（檢查重複）")
         
+        # 直接請求排行榜（已帶 over18=1 cookie 與 Chrome TLS）
+        self.crawler.session.headers['User-Agent'] = FIXED_CHROME_UA
         # 1. 獲取排行榜頁面
         rankings_url = f"{self.crawler.base_url}/rankings/movies"
         params = {
@@ -761,8 +857,11 @@ class JavDBMagnetManager:
             "t": "censored",  # 有碼
             "page": 1
         }
-        
-        response = self.crawler._make_request(rankings_url, params)
+        response = self.crawler._make_request(
+            rankings_url, params,
+            skip_ua_rotation=True,
+            extra_headers={"Referer": self.crawler.base_url + "/"}
+        )
         if not response:
             self.logger.error("無法獲取排行榜頁面")
             return []
@@ -779,20 +878,20 @@ class JavDBMagnetManager:
             self.logger.info("沒有新影片需要爬取")
             return []
         
-        # 4. 使用固定檔名，始終追加模式
+        # 4. 使用固定檔名（月榜專用），始終追加模式
         os.makedirs("magnet", exist_ok=True)
-        filename = "magnet/Url List.txt"  # 固定檔名
+        filename = "magnet/url_list_monthly.txt"
         
         # 檢查文件是否存在，如果不存在則需要初始化 written_urls
         # 注意：如果 scraped_movies.json 不存在（已在上方清空 written_urls），
-        # 這裡不再從 Url List.txt 讀取 URL，確保一致性
+        # 這裡不再從 url_list_monthly.txt 讀取 URL，確保一致性
         if not os.path.exists(filename):
             # 文件不存在，清空 written_urls（新文件）
             self.written_urls.clear()
             self.logger.info(f"創建新文件: {filename}")
         else:
             # 文件已存在，但只有在 scraped_movies.json 也存在時才讀取現有URL
-            # 這樣可以避免因為只有 Url List.txt 而誤判重複
+            # 這樣可以避免因為只有 url_list_monthly.txt 而誤判重複
             scraped_movies_exists = os.path.exists(self.tracker.db_file)
             if scraped_movies_exists:
                 # 文件已存在，讀取現有URL到 written_urls 中（避免重複）
@@ -805,8 +904,8 @@ class JavDBMagnetManager:
                     self.logger.warning(f"讀取現有文件失敗: {e}，將繼續追加")
             else:
                 # scraped_movies.json 不存在，不清除 written_urls（已在上面清空）
-                # 但也不從 Url List.txt 讀取，確保一致性
-                self.logger.info(f"檢測到 {filename} 存在但 scraped_movies.json 不存在，忽略 Url List.txt 中的舊URL以確保一致性")
+                # 但也不從 url_list_monthly.txt 讀取，確保一致性
+                self.logger.info(f"檢測到 {filename} 存在但 scraped_movies.json 不存在，忽略月榜檔中的舊URL以確保一致性")
         
         file_mode = 'a'  # 始終使用追加模式
         
@@ -904,9 +1003,7 @@ class JavDBMagnetManager:
                 
                 f.flush()  # 強制寫入，確保即時保存
                 
-                # 避免請求過於頻繁 - 增加延遲時間以降低被封鎖的風險
-                from utils import random_delay
-                # 如果沒有找到磁力鏈接，延遲更長時間，可能是被限制了
+                # 避免請求過於頻繁 - 增加延遲時間以降低被封鎖的風險（使用模組頂層導入的 random_delay）
                 if not filtered_magnets:
                     self.logger.warning(f"影片 {movie.get('title', '')} 未找到磁力鏈接，延遲更長時間...")
                     random_delay(5, 8)  # 延長到5-8秒
