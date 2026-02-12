@@ -110,6 +110,10 @@ python javdb_magnet_cli.py top30 --export txt --output my_magnets.txt
 
 ## 🔄 更新日誌
 
+### v1.1.4 (2026-02-12)
+* 🛡️ **基礎番號去重**：同一番號的 -C/-UC/-U 等版本（如 MIDA-348、MIDA-348-C）合併為一筆記錄，避免 `scraped_movies.json` 重複。
+* ✅ **測試修正**：驗證程式邏輯、模組導入、路徑使用；移除未使用的 `pathlib` 導入；載入舊資料時自動合併為基礎番號。
+
 ### v1.1.3 (2026-02-06)
 * 🔐 **解決 403 Forbidden**：改用 `curl_cffi` 模擬 Chrome TLS 指紋，大幅降低被阻擋機率。
 * 📖 **文檔校對**：修正 README 標籤預設值為 `高清,字幕` 以符合程式邏輯。
@@ -230,6 +234,10 @@ python javdb_magnet_cli.py top30 --export txt --output my_magnets.txt
 ---
 
 ## 🔄 Update Log
+
+### v1.1.4 (2026-02-12)
+* 🛡️ **Base Code Deduplication**: Same movie variants (e.g. MIDA-348, MIDA-348-C) now merge into a single record in `scraped_movies.json`.
+* ✅ **Testing & Fixes**: Verified program logic, module imports, and path usage; removed unused `pathlib` import; auto-merge legacy data to base codes on load.
 
 ### v1.1.3 (2026-02-06)
 * 🔐 **Fixed 403 Forbidden**: Integrated `curl_cffi` to simulate Chrome TLS fingerprints, replacing standard `requests`.

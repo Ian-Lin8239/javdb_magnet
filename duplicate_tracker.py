@@ -10,13 +10,24 @@ from datetime import datetime
 
 
 class DuplicateTracker:
-    """重複追蹤器"""
+    """重複追蹤器（以基礎番號去重：同一番號的 -C/-UC/-U 等版本視為同一部）"""
     
     def __init__(self, db_file: str = "scraped_movies.json"):
         self.db_file = db_file
         self.max_records = 10000  # 改為 10000 筆
         self.scraped_data = self._load_data()
     
+    def _to_base_code(self, code: str) -> str:
+        """將番號正規化為基礎番號（同一作品不同版本如 -C/-UC/-U 視為同一部）
+        例如：MIDA-348-C、MIDA-348-UC -> MIDA-348；SSIS-886-C -> SSIS-886
+        """
+        if not code or '-' not in code:
+            return code
+        parts = code.split('-')
+        if len(parts) >= 3:
+            return f"{parts[0]}-{parts[1]}"
+        return code
+
     def _is_valid_code(self, code: str) -> bool:
         """驗證番號格式是否正確"""
         if not code or len(code) < 4:
@@ -47,12 +58,15 @@ class DuplicateTracker:
                     if 'scraped_movies' in data:
                         scraped_movies = data['scraped_movies']
                         
-                        # 1. 先過濾掉格式異常的番號
+                        # 1. 先過濾掉格式異常的番號，並以「基礎番號」合併（同番號不同版本只保留一筆）
                         valid_movies = {}
                         invalid_codes = []
                         for code, date in scraped_movies.items():
                             if self._is_valid_code(code):
-                                valid_movies[code] = date
+                                base = self._to_base_code(code)
+                                # 同一基礎番號保留較新的日期
+                                if base not in valid_movies or (date and date > valid_movies.get(base, '')):
+                                    valid_movies[base] = date
                             else:
                                 invalid_codes.append(code)
                         
@@ -94,15 +108,14 @@ class DuplicateTracker:
             raise
     
     def is_already_scraped(self, movie_code: str) -> bool:
-        """檢查影片是否已經爬取過"""
-        # 驗證番號格式
+        """檢查影片是否已經爬取過（以基礎番號判斷，同一番號不同版本 -C/-UC/-U 視為已爬取）"""
         if not self._is_valid_code(movie_code):
-            return False  # 異常格式不視為已爬取
-        return movie_code in self.scraped_data.get('scraped_movies', {})
+            return False
+        base = self._to_base_code(movie_code)
+        return base in self.scraped_data.get('scraped_movies', {})
     
     def mark_as_scraped(self, movie_code: str, scraped_date: str = None):
-        """標記影片為已爬取"""
-        # 驗證番號格式，只記錄有效的番號
+        """標記影片為已爬取（以基礎番號儲存，同一番號不同版本只記一筆）"""
         if not self._is_valid_code(movie_code):
             import logging
             logging.warning(f"跳過記錄異常格式的番號: {movie_code}")
@@ -114,7 +127,8 @@ class DuplicateTracker:
         if 'scraped_movies' not in self.scraped_data:
             self.scraped_data['scraped_movies'] = {}
         
-        self.scraped_data['scraped_movies'][movie_code] = scraped_date
+        base = self._to_base_code(movie_code)
+        self.scraped_data['scraped_movies'][base] = scraped_date
     
     def mark_and_save(self, movie_code: str, scraped_date: str = None):
         """標記影片為已爬取並立即保存到文件"""
